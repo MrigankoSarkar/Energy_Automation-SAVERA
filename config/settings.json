@@ -1,0 +1,29 @@
+{
+  "gmail": {
+    "sender": "alerts@nbsense.com",
+    "subject_contains": "Ems Monitoring Report",
+    "search_days": 2
+  },
+  "pdf": {
+    "expected_unit": "kWh"
+  },
+  "excel": {
+    "file": "E:/Savera_MS_2026/EnergyAutomation_fixed/Test_Analysis_Report_2026.xlsx",
+    "worksheet": "EMS Monitoring Report",
+    "header_row": 3,
+    "date_column": 2,
+    "first_data_row": 5,
+    "total_column": 18,
+    "update_total": true,
+    "fail_on_unmapped_numeric_meter": false
+  },
+  "automation": {
+    "check_interval_minutes": 5,
+    "start_automatically": true,
+    "start_minimized": false
+  },
+  "validation": {
+    "minimum_active_energy": 0,
+    "maximum_active_energy": 100000000
+  }
+}

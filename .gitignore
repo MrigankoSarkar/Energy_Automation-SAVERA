@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+credentials/*
+!credentials/.gitkeep
+database/*.db
+data/pdfs/*
+data/logs/*
+*.log
+*.tmp
+*.bak
