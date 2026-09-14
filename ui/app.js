@@ -1,28 +1,37 @@
+/* ============================================================
+   EnergyAutomation - UI Controller
+   Final UI version
+   - Professional notifications
+   - Larger responsive typography support
+   - Single frontend implementation
+   - Existing backend bridge preserved
+   ============================================================ */
+
 "use strict";
 
+
 /* ============================================================
-   ENERGY AUTOMATION — FRONTEND
-   Single QWebChannel architecture
+   APPLICATION STATE
    ============================================================ */
+
+let state = {
+    settings: null,
+    report: null,
+    activity: []
+};
 
 let bridge = null;
 
-const state = {
-    settings: null,
-    report: null,
-    activity: [],
-    scheduler: {
-        running: false,
-        interval: 5,
-        next_run_at: null
-    }
+const AppState = {
+    nextRunAt: null,
+    schedulerRunning: false,
+    lastRefreshAt: null,
+    notifications: new Map()
 };
-
-let nextRunAt = null;
 
 
 /* ============================================================
-   DOM HELPER
+   HELPERS
    ============================================================ */
 
 function $(id) {
@@ -30,174 +39,388 @@ function $(id) {
 }
 
 
-function escapeHtml(value) {
+function text(value, fallback = "") {
+    if (value === null || value === undefined) {
+        return fallback;
+    }
 
-    return String(value ?? "")
-        .replace(
-            /[&<>"']/g,
-            character => ({
+    return String(value);
+}
+
+
+function escapeHtml(value) {
+    return text(value).replace(
+        /[&<>"']/g,
+        function (character) {
+            return {
                 "&": "&amp;",
                 "<": "&lt;",
                 ">": "&gt;",
                 '"': "&quot;",
                 "'": "&#39;"
-            })[character]
-        );
+            }[character];
+        }
+    );
 }
 
 
 /* ============================================================
-   NOTIFICATIONS
+   NOTIFICATION SYSTEM
    ============================================================ */
 
-function showNotification(
-    message,
-    type = "info",
-    duration = 4500
-) {
+function normalizeNotificationType(type) {
+    const value = text(type, "info").toLowerCase();
 
-    const container =
-        $("globalNotifications");
-
-    if (!container) {
-        return;
+    if (
+        value === "success" ||
+        value === "error" ||
+        value === "warning" ||
+        value === "info"
+    ) {
+        return value;
     }
 
-    const notification =
-        document.createElement("div");
+    return "info";
+}
 
-    notification.className =
-        `global-notification ${type}`;
 
-    const icons = {
-        success: "✓",
-        error: "×",
-        warning: "!",
-        info: "i"
+function getNotificationMeta(type) {
+
+    const metadata = {
+
+        success: {
+            title: "Automation successful",
+            icon: "✓"
+        },
+
+        error: {
+            title: "Action failed",
+            icon: "×"
+        },
+
+        warning: {
+            title: "Attention required",
+            icon: "!"
+        },
+
+        info: {
+            title: "Information",
+            icon: "i"
+        }
     };
 
+    return metadata[type] || metadata.info;
+}
+
+
+function showToast(
+    message,
+    type = "info",
+    duration = null,
+    title = null
+) {
+
+    const container = $("globalNotifications");
+
+    if (!container) {
+        return null;
+    }
+
+
+    type = normalizeNotificationType(type);
+
+
+    const defaultDurations = {
+
+        success: 5000,
+        info: 5500,
+        warning: 7500,
+
+        /* Error remains visible until user dismisses it. */
+        error: 0
+    };
+
+
+    const timeout =
+        duration === null
+            ? defaultDurations[type]
+            : Math.max(0, Number(duration));
+
+
+    const metadata =
+        getNotificationMeta(type);
+
+
+    const notification =
+        document.createElement("article");
+
+
+    const id =
+        "notification-" +
+        Date.now() +
+        "-" +
+        Math.random()
+            .toString(36)
+            .slice(2, 8);
+
+
+    notification.className =
+        "global-notification " + type;
+
+
+    notification.dataset.id =
+        id;
+
+
+    notification.setAttribute(
+        "role",
+        type === "error"
+            ? "alert"
+            : "status"
+    );
+
+
+    const timestamp =
+        new Date().toLocaleTimeString(
+            [],
+            {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit"
+            }
+        );
+
+
     notification.innerHTML = `
-        <div class="notification-icon">
-            ${icons[type] || "i"}
+
+        <div class="notification-accent"></div>
+
+        <div
+            class="notification-icon"
+            aria-hidden="true"
+        >
+            ${metadata.icon}
         </div>
 
-        <div class="notification-content">
+        <div class="notification-body">
 
-            <div class="notification-title">
-                ${notificationTitle(type)}
+            <div class="notification-heading">
+
+                <strong>
+                    ${escapeHtml(
+                        title ||
+                        metadata.title
+                    )}
+                </strong>
+
+                <span class="notification-time">
+                    ${escapeHtml(timestamp)}
+                </span>
+
             </div>
+
 
             <div class="notification-message">
+
                 ${escapeHtml(message)}
+
             </div>
+
+
+            ${
+                timeout > 0
+
+                    ? `
+                        <div
+                            class="notification-progress"
+                            aria-hidden="true"
+                        >
+                            <span></span>
+                        </div>
+                    `
+
+                    : ""
+            }
 
         </div>
 
+
         <button
+            type="button"
             class="notification-close"
-            aria-label="Close notification">
+            aria-label="Dismiss notification"
+            title="Dismiss"
+        >
             ×
         </button>
+
     `;
+
+
+    container.appendChild(
+        notification
+    );
+
+
+    AppState.notifications.set(
+        id,
+        notification
+    );
+
+
+    function closeNotification() {
+
+        if (
+            !notification.parentElement
+        ) {
+            return;
+        }
+
+
+        if (notification._timer) {
+
+            clearTimeout(
+                notification._timer
+            );
+        }
+
+
+        notification.classList.remove(
+            "show"
+        );
+
+
+        notification.classList.add(
+            "closing"
+        );
+
+
+        window.setTimeout(
+            function () {
+
+                notification.remove();
+
+                AppState.notifications.delete(
+                    id
+                );
+
+            },
+            220
+        );
+    }
+
 
     const closeButton =
         notification.querySelector(
             ".notification-close"
         );
 
-    closeButton.onclick = () => {
 
-        notification.classList.remove(
-            "show"
+    if (closeButton) {
+
+        closeButton.addEventListener(
+            "click",
+            closeNotification
         );
+    }
 
-        setTimeout(
-            () => notification.remove(),
-            250
-        );
-    };
-
-    container.appendChild(
-        notification
-    );
 
     requestAnimationFrame(
-        () => {
-            notification.classList.add(
-                "show"
-            );
-        }
-    );
+        function () {
 
-    if (duration > 0) {
+            requestAnimationFrame(
+                function () {
 
-        setTimeout(
-            () => {
-
-                if (
-                    notification.parentElement
-                ) {
-
-                    notification.classList.remove(
+                    notification.classList.add(
                         "show"
                     );
 
-                    setTimeout(
-                        () => notification.remove(),
-                        250
-                    );
                 }
+            );
 
-            },
-            duration
-        );
-    }
-}
-
-
-function notificationTitle(type) {
-
-    switch (type) {
-
-        case "success":
-            return "Completed";
-
-        case "error":
-            return "Error";
-
-        case "warning":
-            return "Attention";
-
-        default:
-            return "EnergyAutomation";
-    }
-}
-
-
-function working(
-    message
-) {
-
-    showNotification(
-        message,
-        "info",
-        3000
+        }
     );
+
+
+    if (timeout > 0) {
+
+        const progressBar =
+            notification.querySelector(
+                ".notification-progress span"
+            );
+
+
+        if (progressBar) {
+
+            progressBar.style.animationDuration =
+                timeout + "ms";
+        }
+
+
+        notification._timer =
+            window.setTimeout(
+                closeNotification,
+                timeout
+            );
+    }
+
+
+    /*
+     * Keep the notification center readable.
+     * Maximum five visible notifications.
+     */
+
+    while (
+        container.children.length > 5
+    ) {
+
+        const oldest =
+            container.firstElementChild;
+
+
+        if (
+            oldest &&
+            oldest._timer
+        ) {
+
+            clearTimeout(
+                oldest._timer
+            );
+        }
+
+
+        if (oldest) {
+            oldest.remove();
+        }
+    }
+
+
+    return id;
 }
+
+
+/*
+ * Compatibility aliases.
+ */
+
+window.showToast =
+    showToast;
+
+
+window.toast =
+    showToast;
 
 
 /* ============================================================
    PAGE NAVIGATION
    ============================================================ */
 
-function setPage(
-    page
-) {
+function setPage(page) {
 
     document
         .querySelectorAll(".page")
         .forEach(
-            element => {
+            function (element) {
 
                 element.classList.toggle(
                     "active",
@@ -207,10 +430,11 @@ function setPage(
             }
         );
 
+
     document
         .querySelectorAll(".nav-item")
         .forEach(
-            button => {
+            function (button) {
 
                 button.classList.toggle(
                     "active",
@@ -219,6 +443,7 @@ function setPage(
 
             }
         );
+
 
     const titles = {
 
@@ -239,7 +464,7 @@ function setPage(
 
         history: [
             "Activity History",
-            "Review completed and failed automation executions."
+            "Persistent local execution log."
         ],
 
         settings: [
@@ -248,309 +473,23 @@ function setPage(
         ]
     };
 
-    if (titles[page]) {
+
+    const selected =
+        titles[page] ||
+        titles.dashboard;
+
+
+    if ($("page-title")) {
 
         $("page-title").textContent =
-            titles[page][0];
+            selected[0];
+    }
+
+
+    if ($("page-description")) {
 
         $("page-description").textContent =
-            titles[page][1];
-    }
-
-    showNotification(
-        `${titles[page]?.[0] || page} opened.`,
-        "info",
-        1800
-    );
-}
-
-
-/* ============================================================
-   SCHEDULER
-   ============================================================ */
-
-function updateScheduler(
-    scheduler
-) {
-
-    const running =
-        Boolean(
-            scheduler?.running
-        );
-
-    state.scheduler =
-        scheduler || state.scheduler;
-
-    nextRunAt =
-        scheduler?.next_run_at
-            ? new Date(
-                scheduler.next_run_at
-            )
-            : null;
-
-    const status =
-        $("scheduler-status");
-
-    const value =
-        $("scheduler-value");
-
-    const note =
-        $("scheduler-note");
-
-    const health =
-        $("health-scheduler");
-
-    const automationStatus =
-        $("automation-status");
-
-    const description =
-        $("automation-description");
-
-    if (status) {
-
-        status.textContent =
-            running
-                ? "RUNNING"
-                : "STOPPED";
-    }
-
-    if (value) {
-
-        value.textContent =
-            running
-                ? "Running"
-                : "Stopped";
-    }
-
-    if (note) {
-
-        note.textContent =
-            `${scheduler?.interval || 5} minute interval`;
-    }
-
-    if (health) {
-
-        health.textContent =
-            running
-                ? "RUNNING"
-                : "STOPPED";
-    }
-
-    if (automationStatus) {
-
-        automationStatus.textContent =
-            running
-                ? "RUNNING"
-                : "STOPPED";
-
-        automationStatus.classList.toggle(
-            "stopped",
-            !running
-        );
-    }
-
-    if (description) {
-
-        description.textContent =
-            running
-                ? "Automatic EMS monitoring is active in the background."
-                : "Automatic monitoring is stopped. Manual Run Now remains available.";
-    }
-
-    updateCountdown();
-}
-
-
-/* ============================================================
-   COUNTDOWN
-   ============================================================ */
-
-function startTimer() {
-
-    setInterval(
-        () => {
-
-            updateClock();
-            updateCountdown();
-
-        },
-        1000
-    );
-
-    updateClock();
-    updateCountdown();
-}
-
-
-function updateClock() {
-
-    const clock =
-        $("liveClock");
-
-    if (!clock) {
-        return;
-    }
-
-    clock.textContent =
-        new Date().toLocaleTimeString(
-            [],
-            {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit"
-            }
-        );
-}
-
-
-function updateCountdown() {
-
-    const timer =
-        $("nextRunTimer");
-
-    const status =
-        $("schedulerTimerStatus");
-
-    if (!timer) {
-        return;
-    }
-
-    if (
-        !nextRunAt ||
-        Number.isNaN(
-            nextRunAt.getTime()
-        )
-    ) {
-
-        timer.textContent =
-            "--:--:--";
-
-        if (status) {
-
-            status.textContent =
-                state.scheduler.running
-                    ? "Waiting for next check"
-                    : "Scheduler stopped";
-        }
-
-        return;
-    }
-
-    let seconds = Math.max(
-        0,
-        Math.floor(
-            (
-                nextRunAt.getTime()
-                -
-                Date.now()
-            ) / 1000
-        )
-    );
-
-    const hours =
-        Math.floor(
-            seconds / 3600
-        );
-
-    seconds %= 3600;
-
-    const minutes =
-        Math.floor(
-            seconds / 60
-        );
-
-    seconds %= 60;
-
-    timer.textContent =
-        `${String(hours).padStart(2, "0")}:` +
-        `${String(minutes).padStart(2, "0")}:` +
-        `${String(seconds).padStart(2, "0")}`;
-
-    if (status) {
-
-        if (
-            hours === 0 &&
-            minutes < 1
-        ) {
-
-            status.textContent =
-                "Automation starting soon";
-
-        } else {
-
-            status.textContent =
-                "Next automatic check";
-        }
-    }
-}
-
-
-/* ============================================================
-   PROGRESS
-   ============================================================ */
-
-function updateProgress(
-    payload
-) {
-
-    const percent =
-        Number(
-            payload.percent ?? 0
-        );
-
-    const progressNumber =
-        $("progress-number");
-
-    const progressBar =
-        $("progress-bar");
-
-    const message =
-        $("pipeline-message");
-
-    if (progressNumber) {
-
-        progressNumber.textContent =
-            `${percent}%`;
-    }
-
-    if (progressBar) {
-
-        progressBar.style.width =
-            `${Math.max(
-                0,
-                Math.min(
-                    100,
-                    percent
-                )
-            )}%`;
-    }
-
-    if (message) {
-
-        message.textContent =
-            payload.message ||
-            "Processing...";
-    }
-
-    if (payload.stage) {
-
-        updateComponent(
-            payload.stage,
-            payload.status ||
-                "running",
-            payload.message
-        );
-    }
-
-    if (
-        payload.message
-    ) {
-
-        addActivity(
-            payload.stage ||
-                "System",
-            payload.message
-        );
+            selected[1];
     }
 }
 
@@ -559,13 +498,22 @@ function updateProgress(
    COMPONENT STATUS
    ============================================================ */
 
-function updateComponent(
+function statusText(status) {
+
+    return text(
+        status,
+        "READY"
+    ).toUpperCase();
+}
+
+
+function setComponent(
     stage,
     status,
     message
 ) {
 
-    const mapping = {
+    const map = {
 
         Gmail: [
             "gmail-status",
@@ -592,403 +540,327 @@ function updateComponent(
         ]
     };
 
-    const ids =
-        mapping[stage];
 
-    if (!ids) {
+    if (!map[stage]) {
         return;
     }
+
+
+    const ids =
+        map[stage];
+
 
     const pill =
         $(ids[0]);
 
+
     const value =
         $(ids[1]);
+
 
     const health =
         $(ids[2]);
 
-    const text =
-        String(
-            status ||
-            "READY"
-        ).toUpperCase();
 
     if (pill) {
+
         pill.textContent =
-            text;
+            statusText(status);
     }
 
+
     if (health) {
+
         health.textContent =
-            text;
+            statusText(status);
     }
+
 
     if (
         value &&
         message
     ) {
 
+        const messageText =
+            text(message);
+
+
         value.textContent =
-            message.length > 25
-                ? `${message.slice(0, 25)}…`
-                : message;
+            messageText.length > 34
+
+                ? messageText.slice(
+                    0,
+                    34
+                ) + "…"
+
+                : messageText;
     }
 
+
+    const className =
+
+        status === "success"
+            ? "success"
+
+            : status === "error"
+                ? "error"
+
+                : status === "running"
+                    ? "running"
+
+                    : "";
+
+
     const step =
-        $(`stage-${stage}`);
+        $("stage-" + stage);
+
 
     if (step) {
 
-        step.classList.remove(
-            "success",
-            "error",
-            "running",
-            "waiting"
-        );
-
-        step.classList.add(
-            status || "running"
-        );
+        step.className =
+            "pipeline-step " +
+            className;
     }
 }
 
 
 /* ============================================================
-   ACTIVITY
+   PROGRESS
    ============================================================ */
 
-function addActivity(
-    stage,
-    message
+function progress(
+    payload = {}
 ) {
 
-    state.activity.unshift({
-
-        timestamp:
-            new Date().toISOString(),
-
-        stage:
-            stage,
-
-        message:
-            message
-    });
-
-    state.activity =
-        state.activity.slice(
+    const percent =
+        Math.max(
             0,
-            50
+            Math.min(
+                100,
+                Number(
+                    payload.percent || 0
+                )
+            )
         );
 
-    renderActivity();
+
+    if ($("progress-number")) {
+
+        $("progress-number")
+            .textContent =
+            percent + "%";
+    }
+
+
+    if ($("progress-bar")) {
+
+        $("progress-bar")
+            .style.width =
+            percent + "%";
+    }
+
+
+    if ($("pipeline-message")) {
+
+        $("pipeline-message")
+            .textContent =
+            payload.message ||
+            "Processing automation...";
+    }
+
+
+    if (payload.stage) {
+
+        setComponent(
+            payload.stage,
+            payload.status,
+            payload.message
+        );
+    }
+
+
+    if ($("last-check")) {
+
+        $("last-check")
+            .textContent =
+            new Date()
+                .toLocaleTimeString();
+    }
 }
 
+
+/* ============================================================
+   ACTIVITY / HISTORY
+   ============================================================ */
 
 function renderActivity() {
 
     const rows =
-        state.activity || [];
+        Array.isArray(state.activity)
 
-    const activity =
-        $("activity-list");
+            ? state.activity.slice(
+                0,
+                30
+            )
 
-    const history =
-        $("history-list");
-
-    const automation =
-        $("automation-log");
+            : [];
 
 
-    if (activity) {
+    if ($("activity-list")) {
 
-        activity.innerHTML =
-            rows.length
-                ? rows.slice(0, 30)
-                    .map(
-                        item => `
+        if (rows.length) {
+
+            $("activity-list")
+                .innerHTML =
+                rows.map(
+                    function (activity) {
+
+                        return `
+
                             <div class="activity-item">
 
-                                <span class="time">
+                                <span
+                                    class="activity-status-dot"
+                                ></span>
+
+                                <span
+                                    class="activity-time"
+                                >
                                     ${escapeHtml(
-                                        item.timestamp
-                                            ?.slice(11, 19)
-                                            || ""
+                                        text(
+                                            activity.timestamp
+                                        ).slice(
+                                            11,
+                                            19
+                                        ) ||
+                                        activity.timestamp
                                     )}
                                 </span>
 
-                                <span class="stage">
+                                <span
+                                    class="activity-stage"
+                                >
                                     ${escapeHtml(
-                                        item.stage || "System"
+                                        activity.stage ||
+                                        "System"
                                     )}
                                 </span>
 
-                                <span class="message">
+                                <span
+                                    class="activity-message"
+                                >
                                     ${escapeHtml(
-                                        item.message || ""
+                                        activity.message ||
+                                        ""
                                     )}
                                 </span>
 
                             </div>
-                        `
-                    )
-                    .join("")
-                : emptyMessage(
-                    "No activity yet",
-                    "Automation activity will appear here after the first execution."
-                );
-    }
 
-
-    if (history) {
-
-        history.innerHTML =
-            rows.length
-                ? rows.map(
-                    item => `
-                        <div class="log-row">
-
-                            <strong>
-                                ${escapeHtml(
-                                    item.stage || "System"
-                                )}
-                            </strong>
-
-                            <span>
-                                ${escapeHtml(
-                                    item.timestamp || ""
-                                )}
-                            </span>
-
-                            <span>
-                                ${escapeHtml(
-                                    item.message || ""
-                                )}
-                            </span>
-
-                        </div>
-                    `
-                ).join("")
-                : emptyMessage(
-                    "History is empty",
-                    "Completed and failed executions will appear here."
-                );
-    }
-
-
-    if (automation) {
-
-        automation.innerHTML =
-            rows.length
-                ? rows.map(
-                    item => `
-                        <div class="log-row">
-
-                            <strong>
-                                ${escapeHtml(
-                                    item.stage || "System"
-                                )}
-                            </strong>
-
-                            <span>
-                                ${escapeHtml(
-                                    item.timestamp || ""
-                                )}
-                            </span>
-
-                            <span>
-                                ${escapeHtml(
-                                    item.message || ""
-                                )}
-                            </span>
-
-                        </div>
-                    `
-                ).join("")
-                : emptyMessage(
-                    "Waiting for automation",
-                    "Execution stages will appear here when the automation starts."
-                );
-    }
-}
-
-
-function emptyMessage(
-    title,
-    description
-) {
-
-    return `
-        <div class="empty-state enhanced-empty">
-
-            <div class="empty-icon">
-                ◌
-            </div>
-
-            <strong>
-                ${escapeHtml(title)}
-            </strong>
-
-            <span>
-                ${escapeHtml(description)}
-            </span>
-
-        </div>
-    `;
-}
-
-
-/* ============================================================
-   REPORT
-   ============================================================ */
-
-function renderReport(
-    report
-) {
-
-    state.report =
-        report;
-
-    const summary =
-        $("report-summary");
-
-    const meta =
-        $("report-meta");
-
-    const table =
-        $("report-table");
-
-    if (!report) {
-
-        if (summary) {
-
-            summary.innerHTML =
-                emptyMessage(
-                    "No report processed yet",
-                    "The latest NBSense report will appear here after automation runs."
-                );
-        }
-
-        if (meta) {
-            meta.textContent =
-                "No report available.";
-        }
-
-        if (table) {
-            table.innerHTML = "";
-        }
-
-        return;
-    }
-
-
-    if (summary) {
-
-        summary.innerHTML = `
-            <strong>
-                ${escapeHtml(
-                    report.date || "Unknown date"
-                )}
-            </strong>
-
-            <br>
-
-            <span>
-                ${escapeHtml(
-                    report.subject || "NBSense EMS Report"
-                )}
-            </span>
-
-            <br><br>
-
-            <span>
-                ${report.updated?.length || 0}
-                Excel cells updated
-            </span>
-
-            <br>
-
-            <span>
-                Total:
-                ${report.total ?? "—"}
-                kWh
-            </span>
-        `;
-    }
-
-
-    if (meta) {
-
-        meta.textContent =
-            `Report date: ${report.date || "—"} · ` +
-            `Worksheet: ${report.worksheet || "—"} · ` +
-            `Excel row: ${report.row || "—"} · ` +
-            `Total: ${report.total ?? "—"} kWh`;
-    }
-
-
-    if (table) {
-
-        table.innerHTML =
-            (report.meters || [])
-                .map(
-                    meter => {
-
-                        const updated =
-                            (
-                                report.updated ||
-                                []
-                            ).find(
-                                item =>
-                                    item.meter_name ===
-                                    meter.meter_name
-                            );
-
-                        return `
-                            <tr>
-
-                                <td>
-                                    ${escapeHtml(
-                                        meter.page ?? ""
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHtml(
-                                        meter.meter_name ?? ""
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${
-                                        meter.state === "N/A"
-                                            ? "N/A"
-                                            : `${meter.active_energy ?? "—"} kWh`
-                                    }
-                                </td>
-
-                                <td>
-                                    ${escapeHtml(
-                                        meter.state || "Processed"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHtml(
-                                        updated?.cell ||
-                                        (
-                                            meter.state === "N/A"
-                                                ? "Skipped"
-                                                : "Unmapped"
-                                        )
-                                    )}
-                                </td>
-
-                            </tr>
                         `;
                     }
-                )
-                .join("");
+                ).join("");
+
+        } else {
+
+            $("activity-list")
+                .innerHTML = `
+
+                    <div class="empty-state compact">
+
+                        <div class="empty-icon">
+                            ◷
+                        </div>
+
+                        <h2>
+                            No activity yet
+                        </h2>
+
+                        <p>
+                            Automation events will appear here
+                            after the first execution.
+                        </p>
+
+                    </div>
+
+                `;
+        }
+    }
+
+
+    const historyHtml =
+
+        rows.length
+
+            ? rows.map(
+                function (activity) {
+
+                    return `
+
+                        <div class="log-row">
+
+                            <div class="log-stage">
+                                ${escapeHtml(
+                                    activity.stage ||
+                                    "System"
+                                )}
+                            </div>
+
+                            <div class="log-time">
+                                ${escapeHtml(
+                                    activity.timestamp ||
+                                    ""
+                                )}
+                            </div>
+
+                            <div class="log-message">
+                                ${escapeHtml(
+                                    activity.message ||
+                                    ""
+                                )}
+                            </div>
+
+                        </div>
+
+                    `;
+                }
+            ).join("")
+
+            : `
+
+                <div class="empty-state large">
+
+                    <div class="empty-icon">
+                        ✓
+                    </div>
+
+                    <h2>
+                        Execution history is empty
+                    </h2>
+
+                    <p>
+                        Run the automation to begin
+                        building the local execution history.
+                    </p>
+
+                </div>
+
+            `;
+
+
+    if ($("history-list")) {
+
+        $("history-list")
+            .innerHTML =
+            historyHtml;
+    }
+
+
+    if ($("automation-log")) {
+
+        $("automation-log")
+            .innerHTML =
+            historyHtml;
     }
 }
 
@@ -1005,241 +877,726 @@ function renderSettings(
         return;
     }
 
-    state.settings =
-        settings;
 
     const values = {
 
         "set-sender":
-            settings.gmail?.sender || "",
+            settings.gmail?.sender ||
+            "",
 
         "set-subject":
-            settings.gmail?.subject_contains || "",
+            settings.gmail?.subject_contains ||
+            "",
 
         "set-days":
-            settings.gmail?.search_days ?? 2,
+            settings.gmail?.search_days ??
+            2,
 
         "set-file":
-            settings.excel?.file || "",
+            settings.excel?.file ||
+            "",
 
         "set-sheet":
-            settings.excel?.worksheet || "",
+            settings.excel?.worksheet ||
+            "",
 
         "set-header":
-            settings.excel?.header_row ?? 3,
+            settings.excel?.header_row ??
+            3,
 
         "set-date-col":
-            settings.excel?.date_column ?? 2,
+            settings.excel?.date_column ??
+            2,
 
         "set-first-row":
-            settings.excel?.first_data_row ?? 5,
+            settings.excel?.first_data_row ??
+            5,
 
         "set-total-col":
-            settings.excel?.total_column ?? 18,
+            settings.excel?.total_column ??
+            18,
 
         "set-interval":
-            settings.automation?.check_interval_minutes ?? 5
+            settings.automation?.check_interval_minutes ??
+            5
     };
 
-    Object.entries(
-        values
-    ).forEach(
-        ([id, value]) => {
 
-            if ($(id)) {
-                $(id).value =
-                    value;
+    Object.keys(values)
+        .forEach(
+            function (id) {
+
+                if ($(id)) {
+
+                    $(id).value =
+                        values[id];
+                }
             }
-        }
-    );
+        );
+
 
     if ($("set-auto")) {
 
-        $("set-auto").checked =
-            Boolean(
-                settings.automation
-                    ?.start_automatically
-            );
+        $("set-auto")
+            .checked =
+            !!settings
+                .automation
+                ?.start_automatically;
     }
+
 
     if ($("set-minimized")) {
 
-        $("set-minimized").checked =
-            Boolean(
-                settings.automation
-                    ?.start_minimized
-            );
+        $("set-minimized")
+            .checked =
+            !!settings
+                .automation
+                ?.start_minimized;
     }
 }
 
 
-/* ============================================================
-   SAVE SETTINGS
-   ============================================================ */
-
 function saveSettings() {
-
-    if (!bridge) {
-
-        showNotification(
-            "Backend connection is not ready.",
-            "error"
-        );
-
-        return;
-    }
-
-    working(
-        "Saving application settings..."
-    );
 
     const settings =
         JSON.parse(
             JSON.stringify(
-                state.settings || {}
+                state.settings ||
+                {}
             )
         );
 
+
     settings.gmail =
-        settings.gmail || {};
+        settings.gmail ||
+        {};
+
 
     settings.excel =
-        settings.excel || {};
+        settings.excel ||
+        {};
+
 
     settings.automation =
-        settings.automation || {};
+        settings.automation ||
+        {};
 
 
     settings.gmail.sender =
-        $("set-sender")?.value.trim() || "";
+        $("set-sender")
+            ?.value
+            .trim() ||
+        "";
+
 
     settings.gmail.subject_contains =
-        $("set-subject")?.value.trim() || "";
+        $("set-subject")
+            ?.value
+            .trim() ||
+        "";
+
 
     settings.gmail.search_days =
         Number(
-            $("set-days")?.value || 2
+            $("set-days")
+                ?.value ||
+            2
         );
 
 
     settings.excel.file =
-        $("set-file")?.value.trim() || "";
+        $("set-file")
+            ?.value
+            .trim() ||
+        "";
+
 
     settings.excel.worksheet =
-        $("set-sheet")?.value.trim() || "";
+        $("set-sheet")
+            ?.value
+            .trim() ||
+        "";
+
 
     settings.excel.header_row =
         Number(
-            $("set-header")?.value || 3
+            $("set-header")
+                ?.value ||
+            3
         );
+
 
     settings.excel.date_column =
         Number(
-            $("set-date-col")?.value || 2
+            $("set-date-col")
+                ?.value ||
+            2
         );
+
 
     settings.excel.first_data_row =
         Number(
-            $("set-first-row")?.value || 5
+            $("set-first-row")
+                ?.value ||
+            5
         );
+
 
     settings.excel.total_column =
         Number(
-            $("set-total-col")?.value || 18
+            $("set-total-col")
+                ?.value ||
+            18
         );
 
 
-    settings.automation.check_interval_minutes =
+    settings.automation
+        .check_interval_minutes =
         Number(
-            $("set-interval")?.value || 5
-        );
-
-    settings.automation.start_automatically =
-        Boolean(
-            $("set-auto")?.checked
-        );
-
-    settings.automation.start_minimized =
-        Boolean(
-            $("set-minimized")?.checked
+            $("set-interval")
+                ?.value ||
+            5
         );
 
 
-    bridge.saveSettings(
-        JSON.stringify(
-            settings
-        )
-    );
+    settings.automation
+        .start_automatically =
+        !!$("set-auto")
+            ?.checked;
+
+
+    settings.automation
+        .start_minimized =
+        !!$("set-minimized")
+            ?.checked;
+
+
+    state.settings =
+        settings;
+
+
+    if (
+        bridge &&
+        typeof bridge.saveSettings ===
+        "function"
+    ) {
+
+        bridge.saveSettings(
+            JSON.stringify(
+                settings
+            )
+        );
+
+
+        showToast(
+            "Settings were sent to the application and are being saved.",
+            "success",
+            4500,
+            "Settings saved"
+        );
+
+    } else {
+
+        showToast(
+            "The application bridge is not available. Settings were not saved.",
+            "error",
+            0,
+            "Settings unavailable"
+        );
+    }
 }
 
 
 /* ============================================================
-   BUTTONS
+   SCHEDULER
    ============================================================ */
 
-function runNow() {
+function renderScheduler(
+    scheduler
+) {
 
-    working(
-        "Run Now selected — starting automation..."
-    );
+    const running =
+        !!scheduler?.running;
 
-    if (!bridge) {
 
-        showNotification(
-            "Backend is not connected.",
-            "error"
-        );
+    AppState.schedulerRunning =
+        running;
 
-        return;
+
+    if ($("scheduler-status")) {
+
+        $("scheduler-status")
+            .textContent =
+            running
+                ? "RUNNING"
+                : "STOPPED";
     }
 
-    bridge.runNow();
+
+    if ($("scheduler-value")) {
+
+        $("scheduler-value")
+            .textContent =
+            running
+                ? "Running"
+                : "Stopped";
+    }
+
+
+    if ($("scheduler-note")) {
+
+        $("scheduler-note")
+            .textContent =
+            (
+                scheduler?.interval ||
+                state.settings
+                    ?.automation
+                    ?.check_interval_minutes ||
+                5
+            ) +
+            " minute interval";
+    }
+
+
+    if ($("health-scheduler")) {
+
+        $("health-scheduler")
+            .textContent =
+            running
+                ? "RUNNING"
+                : "STOPPED";
+    }
+
+
+    if ($("automation-status")) {
+
+        $("automation-status")
+            .textContent =
+            running
+                ? "RUNNING"
+                : "STOPPED";
+
+
+        $("automation-status")
+            .classList.toggle(
+                "stopped",
+                !running
+            );
+    }
+
+
+    if ($("automation-description")) {
+
+        $("automation-description")
+            .textContent =
+            running
+
+                ? "The application checks Gmail in the background."
+
+                : "The scheduler is stopped. Run Now is still available.";
+    }
 }
 
 
-function stopAutomation() {
+function setNextRunTime(
+    value
+) {
 
-    working(
-        "Stop selected — stopping automatic monitoring..."
-    );
+    if (!value) {
 
-    if (!bridge) {
+        AppState.nextRunAt =
+            null;
 
-        showNotification(
-            "Backend is not connected.",
-            "error"
+        updateCountdown();
+
+        return;
+    }
+
+
+    const date =
+        new Date(value);
+
+
+    if (
+        Number.isNaN(
+            date.getTime()
+        )
+    ) {
+
+        console.warn(
+            "Invalid scheduler timestamp:",
+            value
         );
 
         return;
     }
 
-    bridge.stop();
+
+    AppState.nextRunAt =
+        date;
+
+
+    updateCountdown();
 }
 
 
-function refreshApplication() {
+function updateCountdown() {
 
-    /*
-     * IMPORTANT:
-     *
-     * This does not restart the timer.
-     */
+    const timer =
+        $("nextRunTimer");
 
-    working(
-        "Refresh selected — updating application data..."
-    );
 
-    if (!bridge) {
+    const status =
+        $("schedulerTimerStatus");
 
-        showNotification(
-            "Backend is not connected.",
-            "error"
-        );
+
+    if (!timer) {
+        return;
+    }
+
+
+    if (!AppState.nextRunAt) {
+
+        timer.textContent =
+            "--:--:--";
+
+
+        if (status) {
+
+            status.textContent =
+                "Waiting for scheduler";
+        }
+
 
         return;
     }
 
-    bridge.refresh();
+
+    let seconds =
+        Math.max(
+            0,
+            Math.floor(
+                (
+                    AppState.nextRunAt
+                        .getTime() -
+                    Date.now()
+                ) / 1000
+            )
+        );
+
+
+    const hours =
+        Math.floor(
+            seconds / 3600
+        );
+
+
+    seconds %= 3600;
+
+
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+
+    seconds %= 60;
+
+
+    timer.textContent =
+
+        String(hours)
+            .padStart(2, "0")
+
+        + ":" +
+
+        String(minutes)
+            .padStart(2, "0")
+
+        + ":" +
+
+        String(seconds)
+            .padStart(2, "0");
+
+
+    if (status) {
+
+        status.textContent =
+
+            hours === 0 &&
+            minutes < 1
+
+                ? "Automation starting soon"
+
+                : "Next automatic check";
+    }
+}
+
+
+function updateClock() {
+
+    if ($("liveClock")) {
+
+        $("liveClock")
+            .textContent =
+            new Date()
+                .toLocaleTimeString(
+                    [],
+                    {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit"
+                    }
+                );
+    }
+}
+
+
+/* ============================================================
+   REPORT
+   ============================================================ */
+
+function renderReport(
+    report
+) {
+
+    state.report =
+        report;
+
+
+    if (!report) {
+
+        if ($("report-summary")) {
+
+            $("report-summary")
+                .innerHTML = `
+
+                    <div class="empty-state compact">
+
+                        <div class="empty-icon">
+                            ▤
+                        </div>
+
+                        <h2>
+                            No report processed yet
+                        </h2>
+
+                        <p>
+                            The latest verified NBSense
+                            report will appear here.
+                        </p>
+
+                    </div>
+
+                `;
+        }
+
+
+        if ($("report-table")) {
+
+            $("report-table")
+                .innerHTML = "";
+        }
+
+
+        if ($("report-meta")) {
+
+            $("report-meta")
+                .textContent =
+                "No report available.";
+        }
+
+
+        return;
+    }
+
+
+    if ($("report-summary")) {
+
+        $("report-summary")
+            .innerHTML = `
+
+                <strong>
+                    ${escapeHtml(
+                        report.date ||
+                        "—"
+                    )}
+                </strong>
+
+                <br>
+
+                <span>
+                    ${escapeHtml(
+                        report.subject ||
+                        ""
+                    )}
+                </span>
+
+                <br>
+
+                <span>
+                    ${Number(
+                        report.updated
+                            ?.length ||
+                        0
+                    )}
+                    Excel cells updated ·
+                    Total
+                    ${escapeHtml(
+                        report.total ??
+                        "—"
+                    )}
+                    kWh
+                </span>
+
+            `;
+    }
+
+
+    if ($("report-meta")) {
+
+        $("report-meta")
+            .textContent =
+
+            "Report date: " +
+            text(
+                report.date,
+                "—"
+            ) +
+
+            " · Worksheet: " +
+
+            text(
+                report.worksheet,
+                "—"
+            ) +
+
+            " · Excel row: " +
+
+            text(
+                report.row,
+                "—"
+            ) +
+
+            " · Total: " +
+
+            text(
+                report.total,
+                "—"
+            ) +
+
+            " kWh";
+    }
+
+
+    if (!$("report-table")) {
+        return;
+    }
+
+
+    $("report-table")
+        .innerHTML =
+
+        (report.meters || [])
+            .map(
+                function (meter) {
+
+                    const updated =
+                        (
+                            report.updated ||
+                            []
+                        ).find(
+                            function (item) {
+
+                                return (
+                                    item.meter_name ===
+                                    meter.meter_name
+                                );
+                            }
+                        );
+
+
+                    const energy =
+
+                        meter.state ===
+                        "N/A"
+
+                            ? "N/A"
+
+                            : text(
+                                meter.active_energy,
+                                "—"
+                            ) +
+                            " kWh";
+
+
+                    const cell =
+                        updated?.cell ||
+
+                        (
+                            meter.state ===
+                            "N/A"
+
+                                ? "Skipped"
+
+                                : "Unmapped"
+                        );
+
+
+                    return `
+
+                        <tr>
+
+                            <td>
+                                ${escapeHtml(
+                                    meter.page ??
+                                    "—"
+                                )}
+                            </td>
+
+                            <td>
+                                ${escapeHtml(
+                                    meter.meter_name ||
+                                    "—"
+                                )}
+                            </td>
+
+                            <td>
+                                ${escapeHtml(
+                                    energy
+                                )}
+                            </td>
+
+                            <td>
+
+                                <span
+                                    class="table-state ${
+                                        meter.state ===
+                                        "N/A"
+                                            ? "na"
+                                            : "ok"
+                                    }"
+                                >
+                                    ${escapeHtml(
+                                        meter.state ||
+                                        "—"
+                                    )}
+                                </span>
+
+                            </td>
+
+                            <td>
+                                ${escapeHtml(
+                                    cell
+                                )}
+                            </td>
+
+                        </tr>
+
+                    `;
+                }
+            )
+            .join("");
 }
 
 
@@ -1247,31 +1604,41 @@ function refreshApplication() {
    BACKEND EVENTS
    ============================================================ */
 
-window.backendEvent =
-function (
+function backendEvent(
     eventName,
     raw
 ) {
 
     let payload = {};
 
+
     try {
 
         payload =
             typeof raw === "string"
+
                 ? JSON.parse(raw)
-                : raw || {};
+
+                : (
+                    raw ||
+                    {}
+                );
 
     } catch (error) {
 
-        showNotification(
-            "Invalid backend response received.",
-            "error"
-        );
-
         console.error(
+            "Could not parse backend event:",
             error
         );
+
+
+        showToast(
+            "The application returned an invalid event payload.",
+            "error",
+            0,
+            "Backend event error"
+        );
+
 
         return;
     }
@@ -1281,37 +1648,40 @@ function (
 
         case "initialState":
 
-            state.settings =
-                payload.settings;
+            state =
+                payload ||
+                state;
 
-            state.report =
-                payload.report;
-
-            state.activity =
-                payload.activity || [];
 
             renderSettings(
                 state.settings
             );
 
+
             renderScheduler(
-                payload.scheduler
+                state.scheduler
             );
 
+
             renderActivity();
+
 
             renderReport(
                 state.report
             );
 
-            break;
 
+            if (
+                state.scheduler
+                    ?.next_run_at
+            ) {
 
-        case "settings":
+                setNextRunTime(
+                    state.scheduler
+                        .next_run_at
+                );
+            }
 
-            renderSettings(
-                payload
-            );
 
             break;
 
@@ -1322,48 +1692,64 @@ function (
                 payload
             );
 
+
+            if (
+                payload.next_run_at
+            ) {
+
+                setNextRunTime(
+                    payload.next_run_at
+                );
+            }
+
+
             break;
 
 
         case "next_run":
 
-            nextRunAt =
+            setNextRunTime(
                 payload.next_run_at
-                    ? new Date(
-                        payload.next_run_at
-                    )
-                    : null;
-
-            updateCountdown();
-
-            break;
-
-
-        case "progress":
-
-            updateProgress(
-                payload
             );
+
 
             break;
 
 
         case "notification":
 
-            showNotification(
+            showToast(
+
                 payload.message ||
-                    "Application event.",
+                "Application notification",
+
                 payload.type ||
-                    "info",
-                payload.duration ||
-                    4500
+                "info",
+
+                payload.duration ===
+                undefined
+
+                    ? null
+
+                    : payload.duration,
+
+                payload.title ||
+                null
             );
 
-            addActivity(
-                "System",
-                payload.message ||
-                    "Application event."
+
+            break;
+
+
+        case "progress":
+
+            progress(
+                payload
             );
+
+
+            renderActivity();
+
 
             break;
 
@@ -1374,662 +1760,452 @@ function (
                 payload
             );
 
+
             break;
 
 
-        case "automation_result":
+        case "settings":
 
-            handleAutomationResult(
+            state.settings =
+                payload;
+
+
+            renderSettings(
                 payload
             );
 
+
             break;
 
 
-        case "success":
+        case "success": {
 
-            handleSuccess(
-                payload
+            const report =
+                payload.report ||
+                payload;
+
+
+            if (
+                report &&
+                (
+                    report.date ||
+                    report.meters ||
+                    report.updated
+                )
+            ) {
+
+                renderReport({
+
+                    date:
+                        report.date,
+
+                    subject:
+                        report.subject,
+
+                    total:
+                        report.total,
+
+                    updated:
+                        report.updated ||
+                        [],
+
+                    meters:
+                        report.meters ||
+                        [],
+
+                    worksheet:
+                        report.worksheet,
+
+                    row:
+                        report.row
+                });
+            }
+
+
+            progress({
+
+                stage:
+                    "Scheduler",
+
+                status:
+                    "success",
+
+                message:
+                    "Automation completed successfully.",
+
+                percent:
+                    100
+            });
+
+
+            renderActivity();
+
+
+            showToast(
+
+                payload.message ||
+
+                "The NBSense report was processed and the existing Excel workbook was updated successfully.",
+
+                "success",
+
+                6000,
+
+                "Automation completed"
             );
 
-            break;
-
-
-        case "error":
-
-            handleError(
-                payload
-            );
 
             break;
+        }
 
 
         case "waiting":
 
-            updateProgress({
-                stage: "Gmail",
-                status: "waiting",
+            progress({
+
+                stage:
+                    "Gmail",
+
+                status:
+                    "waiting",
+
                 message:
                     payload.message ||
                     "Waiting for a new NBSense report.",
-                percent: 10
+
+                percent:
+                    10
             });
 
-            showNotification(
+
+            showToast(
+
                 payload.message ||
-                    "No new report found.",
-                "info"
+                "No new report is available yet.",
+
+                "info",
+
+                5500,
+
+                "Waiting for report"
             );
 
+
             break;
-    }
-};
 
 
-/* ============================================================
-   SCHEDULER RENDER
-   ============================================================ */
+        case "failure":
 
-function renderScheduler(
-    scheduler
-) {
+        case "error":
 
-    state.scheduler =
-        scheduler || state.scheduler;
+            progress({
 
-    nextRunAt =
-        scheduler?.next_run_at
-            ? new Date(
-                scheduler.next_run_at
-            )
-            : null;
+                stage:
+                    "Scheduler",
 
-    updateScheduler(
-        scheduler
-    );
-}
+                status:
+                    "error",
 
-
-/* ============================================================
-   AUTOMATION RESULT
-   ============================================================ */
-
-function handleAutomationResult(
-    result
-) {
-
-    if (!result) {
-        return;
-    }
-
-    if (result.success === false) {
-
-        handleError(
-            {
                 message:
-                    result.error ||
-                    "Automation failed."
-            }
-        );
+                    payload.message ||
+                    "Automation failed.",
 
-        return;
-    }
+                percent:
+                    0
+            });
 
-    if (result.report) {
 
-        renderReport(
-            result.report
-        );
-    }
+            showToast(
 
-    if (result.excel) {
+                payload.message ||
+                "Automation failed.",
 
-        const count =
-            result.excel.updated?.length ||
-            0;
+                "error",
 
-        showNotification(
-            `Automation completed. ${count} Excel cell(s) updated.`,
-            "success",
-            6000
-        );
+                0,
+
+                "Automation error"
+            );
+
+
+            renderActivity();
+
+
+            break;
+
+
+        default:
+
+            console.debug(
+                "Unhandled backend event:",
+                eventName,
+                payload
+            );
     }
 }
 
 
+window.backendEvent =
+    backendEvent;
+
+
 /* ============================================================
-   SUCCESS
+   BRIDGE ACTIONS
    ============================================================ */
 
-function handleSuccess(
-    payload
+function callBridge(
+    method,
+    ...args
 ) {
-
-    const report =
-        payload.report;
-
-    if (report) {
-
-        renderReport(
-            report
-        );
-    }
-
-    updateProgress({
-        stage: "Scheduler",
-        status: "success",
-        message:
-            "Automation completed successfully.",
-        percent: 100
-    });
-
-    showNotification(
-        payload.message ||
-            "Automation completed successfully.",
-        "success",
-        5500
-    );
-}
-
-
-/* ============================================================
-   ERROR
-   ============================================================ */
-
-function handleError(
-    payload
-) {
-
-    const message =
-        payload.message ||
-        "Automation failed.";
-
-    updateProgress({
-        stage: "Scheduler",
-        status: "error",
-        message: message,
-        percent: 0
-    });
-
-    addActivity(
-        "ERROR",
-        message
-    );
-
-    showNotification(
-        message,
-        "error",
-        9000
-    );
-}
-
-
-/* ============================================================
-   COACH MARKS
-   ============================================================ */
-
-const coachSteps = [
-
-    {
-        selector:
-            ".brand",
-
-        title:
-            "Welcome to EnergyAutomation",
-
-        text:
-            "This application automatically finds NBSense EMS reports, extracts energy readings and updates the existing Excel workbook."
-    },
-
-    {
-        selector:
-            "#nextRunTimer",
-
-        title:
-            "Automatic scheduler",
-
-        text:
-            "This countdown shows when the next automatic EMS check will run. Refreshing the application does not reset this timer."
-    },
-
-    {
-        selector:
-            "#run-btn",
-
-        title:
-            "Run Now",
-
-        text:
-            "Use Run Now when you want to execute the complete Gmail → PDF → Excel workflow immediately."
-    },
-
-    {
-        selector:
-            "#refresh-btn",
-
-        title:
-            "Refresh",
-
-        text:
-            "Refresh updates application information without restarting the scheduler."
-    },
-
-    {
-        selector:
-            '[data-page="reports"]',
-
-        title:
-            "Reports",
-
-        text:
-            "Open Reports to inspect extracted meter readings and their Excel cell mappings."
-    },
-
-    {
-        selector:
-            '[data-page="history"]',
-
-        title:
-            "History",
-
-        text:
-            "Execution history records what the automation has done, including successful and failed operations."
-    },
-
-    {
-        selector:
-            '[data-page="settings"]',
-
-        title:
-            "Settings",
-
-        text:
-            "Configure Gmail search, Excel workbook, worksheet and scheduler behavior here."
-    }
-];
-
-
-let coachIndex = 0;
-
-
-function createCoachMarks() {
 
     if (
-        document.getElementById(
-            "coach-overlay"
-        )
+        !bridge ||
+        typeof bridge[method] !==
+        "function"
     ) {
-        return;
+
+        showToast(
+
+            "The " +
+            method +
+            " action is currently unavailable.",
+
+            "error",
+
+            0,
+
+            "Application bridge unavailable"
+        );
+
+
+        return false;
     }
 
-    const overlay =
-        document.createElement("div");
 
-    overlay.id =
-        "coach-overlay";
+    try {
 
-    overlay.innerHTML = `
-        <div id="coach-backdrop"></div>
+        bridge[method](
+            ...args
+        );
 
-        <div id="coach-card">
 
-            <div class="coach-progress">
-                <span id="coach-step">
-                    1 / ${coachSteps.length}
-                </span>
-            </div>
+        return true;
 
-            <h3 id="coach-title">
-                Welcome
-            </h3>
+    } catch (error) {
 
-            <p id="coach-text">
-                Learn how to use EnergyAutomation.
-            </p>
+        console.error(
+            "Bridge action failed:",
+            method,
+            error
+        );
 
-            <div class="coach-actions">
 
-                <button
-                    id="coach-skip"
-                    class="coach-link">
-                    Skip tour
-                </button>
+        showToast(
 
-                <div>
+            "Could not execute " +
+            method +
+            ": " +
+            (
+                error.message ||
+                error
+            ),
 
-                    <button
-                        id="coach-prev"
-                        class="btn btn-secondary">
-                        Previous
-                    </button>
+            "error",
 
-                    <button
-                        id="coach-next"
-                        class="btn btn-primary">
-                        Next
-                    </button>
+            0,
 
-                </div>
+            "Action failed"
+        );
 
-            </div>
 
-        </div>
-    `;
-
-    document.body.appendChild(
-        overlay
-    );
-
-    $("coach-next").onclick =
-        nextCoachStep;
-
-    $("coach-prev").onclick =
-        previousCoachStep;
-
-    $("coach-skip").onclick =
-        closeCoachMarks;
-
-    showCoachStep();
+        return false;
+    }
 }
 
 
-function showCoachStep() {
+/* ============================================================
+   RUN NOW
+   ============================================================ */
 
-    const step =
-        coachSteps[coachIndex];
+function runNow() {
 
-    if (!step) {
-        return;
-    }
-
-    document
-        .querySelectorAll(
-            ".coach-highlight"
+    if (
+        callBridge(
+            "runNow"
         )
-        .forEach(
-            element =>
-                element.classList.remove(
-                    "coach-highlight"
-                )
-        );
+    ) {
 
-    const target =
-        document.querySelector(
-            step.selector
-        );
+        progress({
 
-    if (target) {
+            stage:
+                "Scheduler",
 
-        target.classList.add(
-            "coach-highlight"
-        );
+            status:
+                "running",
 
-        target.scrollIntoView({
-            behavior: "smooth",
-            block: "center"
+            message:
+                "Manual automation run started.",
+
+            percent:
+                5
         });
-    }
-
-    $("coach-step").textContent =
-        `${coachIndex + 1} / ${coachSteps.length}`;
-
-    $("coach-title").textContent =
-        step.title;
-
-    $("coach-text").textContent =
-        step.text;
-
-    $("coach-prev").disabled =
-        coachIndex === 0;
-
-    $("coach-next").textContent =
-        coachIndex ===
-        coachSteps.length - 1
-            ? "Finish"
-            : "Next";
-}
 
 
-function nextCoachStep() {
+        showToast(
 
-    if (
-        coachIndex <
-        coachSteps.length - 1
-    ) {
+            "The automation run has started. Processing is running in the background.",
 
-        coachIndex++;
+            "info",
 
-        showCoachStep();
+            4500,
 
-    } else {
-
-        closeCoachMarks();
-    }
-}
-
-
-function previousCoachStep() {
-
-    if (
-        coachIndex > 0
-    ) {
-
-        coachIndex--;
-
-        showCoachStep();
-    }
-}
-
-
-function closeCoachMarks() {
-
-    const overlay =
-        $("coach-overlay");
-
-    if (overlay) {
-
-        overlay.remove();
-    }
-
-    document
-        .querySelectorAll(
-            ".coach-highlight"
-        )
-        .forEach(
-            element =>
-                element.classList.remove(
-                    "coach-highlight"
-                )
+            "Automation started"
         );
-
-    localStorage.setItem(
-        "energyautomation-coach-completed",
-        "1"
-    );
+    }
 }
 
 
 /* ============================================================
-   TOOLTIPS
+   REFRESH
    ============================================================ */
 
-function installTooltips() {
+function refreshDashboard() {
 
-    document
-        .querySelectorAll(
-            "button"
+    AppState.lastRefreshAt =
+        new Date();
+
+
+    if (
+        callBridge(
+            "refresh"
         )
-        .forEach(
-            button => {
+    ) {
 
-                if (
-                    !button.title
-                ) {
+        showToast(
 
-                    const text =
-                        button.textContent
-                            .trim();
+            "Application data is being refreshed.",
 
-                    if (text) {
+            "info",
 
-                        button.title =
-                            text;
-                    }
-                }
-            }
+            3000,
+
+            "Refreshing"
         );
-
-    const tooltipTargets = {
-
-        "#run-btn":
-            "Run the complete EMS automation immediately.",
-
-        "#refresh-btn":
-            "Refresh application information without resetting the scheduler.",
-
-        "#automation-run":
-            "Run the EMS workflow immediately.",
-
-        "#automation-stop":
-            "Stop future automatic scheduler executions.",
-
-        "#automation-refresh":
-            "Refresh application information without resetting the timer.",
-
-        "#nextRunTimer":
-            "Time remaining until the next automatic EMS check.",
-
-        "#save-settings":
-            "Save configuration changes to settings.json."
-    };
-
-    Object.entries(
-        tooltipTargets
-    ).forEach(
-        ([selector, text]) => {
-
-            const element =
-                document.querySelector(
-                    selector
-                );
-
-            if (element) {
-
-                element.setAttribute(
-                    "data-tooltip",
-                    text
-                );
-            }
-        }
-    );
+    }
 }
 
 
 /* ============================================================
-   NAVIGATION BUTTONS
+   STOP
    ============================================================ */
 
-function installNavigation() {
+function stopAutomation() {
+
+    if (
+        callBridge(
+            "stop"
+        )
+    ) {
+
+        showToast(
+
+            "The scheduler stop command was sent successfully.",
+
+            "warning",
+
+            4500,
+
+            "Scheduler stopping"
+        );
+    }
+}
+
+
+/* ============================================================
+   DOM EVENTS
+   ============================================================ */
+
+function bindEvents() {
 
     document
         .querySelectorAll(
             ".nav-item"
         )
         .forEach(
-            button => {
+            function (button) {
 
                 button.addEventListener(
                     "click",
-                    () => {
-
-                        const page =
-                            button.dataset.page;
+                    function () {
 
                         setPage(
-                            page
+                            button.dataset.page
                         );
+
                     }
                 );
+
             }
         );
-}
 
 
-/* ============================================================
-   BUTTON INSTALLATION
-   ============================================================ */
+    if ($("run-btn")) {
 
-function installButtons() {
-
-    const run =
-        $("run-btn");
-
-    if (run) {
-
-        run.addEventListener(
-            "click",
-            runNow
-        );
+        $("run-btn")
+            .addEventListener(
+                "click",
+                runNow
+            );
     }
 
 
-    const refresh =
-        $("refresh-btn");
+    if ($("automation-run")) {
 
-    if (refresh) {
-
-        refresh.addEventListener(
-            "click",
-            refreshApplication
-        );
+        $("automation-run")
+            .addEventListener(
+                "click",
+                runNow
+            );
     }
 
 
-    const automationRun =
-        $("automation-run");
+    if ($("refresh-btn")) {
 
-    if (automationRun) {
-
-        automationRun.addEventListener(
-            "click",
-            runNow
-        );
+        $("refresh-btn")
+            .addEventListener(
+                "click",
+                refreshDashboard
+            );
     }
 
 
-    const automationStop =
-        $("automation-stop");
+    if ($("automation-refresh")) {
 
-    if (automationStop) {
-
-        automationStop.addEventListener(
-            "click",
-            stopAutomation
-        );
+        $("automation-refresh")
+            .addEventListener(
+                "click",
+                refreshDashboard
+            );
     }
 
 
-    const automationRefresh =
-        $("automation-refresh");
+    if ($("automation-stop")) {
 
-    if (automationRefresh) {
-
-        automationRefresh.addEventListener(
-            "click",
-            refreshApplication
-        );
+        $("automation-stop")
+            .addEventListener(
+                "click",
+                stopAutomation
+            );
     }
 
 
-    const save =
-        $("save-settings");
+    if ($("save-settings")) {
 
-    if (save) {
-
-        save.addEventListener(
-            "click",
-            saveSettings
-        );
+        $("save-settings")
+            .addEventListener(
+                "click",
+                saveSettings
+            );
     }
 }
 
@@ -2041,44 +2217,109 @@ function installButtons() {
 function initializeBridge() {
 
     if (
-        typeof qt === "undefined" ||
+        typeof QWebChannel ===
+        "undefined" ||
+
+        typeof qt ===
+        "undefined" ||
+
         !qt.webChannelTransport
     ) {
 
-        showNotification(
-            "Qt WebChannel is unavailable.",
-            "error",
-            10000
+        console.warn(
+            "QWebChannel is not available."
         );
+
 
         return;
     }
 
 
     new QWebChannel(
+
         qt.webChannelTransport,
-        channel => {
+
+        function (channel) {
 
             bridge =
-                channel.objects.bridge;
+                channel.objects.bridge ||
+                null;
+
 
             if (!bridge) {
 
-                showNotification(
-                    "Python backend bridge was not found.",
+                showToast(
+
+                    "The application backend bridge could not be found.",
+
                     "error",
-                    10000
+
+                    0,
+
+                    "Backend connection failed"
                 );
+
 
                 return;
             }
 
-            showNotification(
-                "Python automation backend connected.",
-                "success",
-                3000
-            );
 
+            /*
+             * Generic backend event signal.
+             */
+
+            if (
+                bridge.event &&
+                typeof bridge.event.connect ===
+                "function"
+            ) {
+
+                bridge.event.connect(
+
+                    function (
+                        eventName,
+                        payload
+                    ) {
+
+                        backendEvent(
+                            eventName,
+                            payload
+                        );
+                    }
+                );
+            }
+
+
+            /*
+             * Existing toast signal.
+             */
+
+            if (
+                bridge.toast &&
+                typeof bridge.toast.connect ===
+                "function"
+            ) {
+
+                bridge.toast.connect(
+
+                    function (
+                        message,
+                        type
+                    ) {
+
+                        showToast(
+                            message,
+                            type ||
+                            "info"
+                        );
+                    }
+                );
+            }
+
+
+            /*
+             * Load initial state.
+             */
 
             if (
                 typeof bridge.getInitialState ===
@@ -2086,73 +2327,52 @@ function initializeBridge() {
             ) {
 
                 bridge.getInitialState(
-                    raw => {
 
-                        try {
+                    function (raw) {
 
-                            const initial =
-                                JSON.parse(
-                                    raw
-                                );
-
-                            backendEvent(
-                                "initialState",
-                                initial
-                            );
-
-                        } catch (error) {
-
-                            showNotification(
-                                "Could not load initial application state.",
-                                "error"
-                            );
-
-                            console.error(
-                                error
-                            );
-                        }
+                        backendEvent(
+                            "initialState",
+                            raw
+                        );
                     }
                 );
             }
+
         }
     );
 }
 
 
 /* ============================================================
-   APPLICATION START
+   APPLICATION STARTUP
    ============================================================ */
 
 document.addEventListener(
     "DOMContentLoaded",
-    () => {
+    function () {
 
-        installNavigation();
+        bindEvents();
 
-        installButtons();
 
-        installTooltips();
+        updateClock();
 
-        startTimer();
+
+        updateCountdown();
+
+
+        window.setInterval(
+            function () {
+
+                updateClock();
+
+                updateCountdown();
+
+            },
+            1000
+        );
+
 
         initializeBridge();
 
-        renderActivity();
-
-        renderReport(
-            null
-        );
-
-        if (
-            !localStorage.getItem(
-                "energyautomation-coach-completed"
-            )
-        ) {
-
-            setTimeout(
-                createCoachMarks,
-                1200
-            );
-        }
     }
 );
