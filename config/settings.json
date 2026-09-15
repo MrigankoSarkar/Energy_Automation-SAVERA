@@ -1,4 +1,6 @@
 {
+  "company": "Savera MS",
+  "plant": "Chennai Manufacturing Plant",
   "gmail": {
     "sender": "alerts@nbsense.com",
     "subject_contains": "Ems Monitoring Report",
@@ -8,7 +10,7 @@
     "expected_unit": "kWh"
   },
   "excel": {
-    "file": "E:/Savera_MS_2026/EnergyAutomation_fixed/Test_Analysis_Report_2026.xlsx",
+    "file": "Test_BI_Analysis_Report_2026.xlsx",
     "worksheet": "EMS Monitoring Report",
     "header_row": 3,
     "date_column": 2,
@@ -25,5 +27,15 @@
   "validation": {
     "minimum_active_energy": 0,
     "maximum_active_energy": 100000000
+  },
+  "gemini": {
+    "enabled": true,
+    "model": "gemini-2.5-flash",
+    "api_key": ""
+  },
+  "powerbi": {
+    "enabled": false,
+    "workspace_id": "",
+    "dataset_id": ""
   }
 }

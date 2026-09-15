@@ -1,0 +1,100 @@
+// ====================================================================
+// EnergyAutomation — Industrial EMS Power BI DAX Measures
+// Target Plant: Savera MS Manufacturing Facility
+// ====================================================================
+
+// --- 1. Total & Daily Aggregates ---
+[Total Energy (kWh)] = 
+SUM(Fact_EnergyConsumption[ActiveEnergy_kWh])
+
+[Daily Energy] = 
+CALCULATE(
+    [Total Energy (kWh)], 
+    ALLEXCEPT(Dim_Date, Dim_Date[Date])
+)
+
+[Yesterday Energy] = 
+CALCULATE(
+    [Total Energy (kWh)], 
+    DATEADD(Dim_Date[Date], -1, DAY)
+)
+
+[Day-over-Day Variance (kWh)] = 
+[Total Energy (kWh)] - [Yesterday Energy]
+
+[Day-over-Day Growth %] = 
+DIVIDE(
+    [Day-over-Day Variance (kWh)], 
+    [Yesterday Energy], 
+    0
+)
+
+// --- 2. Period-to-Date Metrics ---
+[MTD Energy (kWh)] = 
+TOTALMTD(
+    [Total Energy (kWh)], 
+    Dim_Date[Date]
+)
+
+[YTD Energy (kWh)] = 
+TOTALYTD(
+    [Total Energy (kWh)], 
+    Dim_Date[Date]
+)
+
+[Average Daily Energy] = 
+AVERAGEX(
+    VALUES(Dim_Date[Date]), 
+    [Total Energy (kWh)]
+)
+
+[Peak Daily Energy] = 
+MAXX(
+    VALUES(Dim_Date[Date]), 
+    [Total Energy (kWh)]
+)
+
+// --- 3. Operational Analysis ---
+[Weekend Energy (kWh)] = 
+CALCULATE(
+    [Total Energy (kWh)], 
+    Dim_Date[IsWeekend] = TRUE()
+)
+
+[Weekday Energy (kWh)] = 
+CALCULATE(
+    [Total Energy (kWh)], 
+    Dim_Date[IsWeekend] = FALSE()
+)
+
+[Weekend vs Weekday Ratio] = 
+DIVIDE(
+    [Weekend Energy (kWh)], 
+    [Weekday Energy (kWh)], 
+    0
+)
+
+[Active Meter Count] = 
+CALCULATE(
+    DISTINCTCOUNT(Fact_EnergyConsumption[MeterKey]), 
+    Fact_EnergyConsumption[Status] = "OK"
+)
+
+[Missing Meter Reading Count] = 
+CALCULATE(
+    COUNTROWS(Fact_EnergyConsumption), 
+    Fact_EnergyConsumption[Status] = "N/A"
+)
+
+[Anomaly Count] = 
+CALCULATE(
+    COUNTROWS(Fact_EnergyConsumption), 
+    Fact_EnergyConsumption[IsAnomaly] = TRUE()
+)
+
+[Meter Contribution %] = 
+DIVIDE(
+    [Total Energy (kWh)], 
+    CALCULATE([Total Energy (kWh)], ALL(Dim_Meter)), 
+    0
+)

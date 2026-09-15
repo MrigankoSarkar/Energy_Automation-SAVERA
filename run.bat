@@ -1,7 +1,5 @@
 @echo off
-
 setlocal
-
 cd /d "%~dp0"
 
 echo ==========================================
@@ -9,9 +7,15 @@ echo       EnergyAutomation
 echo ==========================================
 echo.
 
-echo Starting application...
+if exist ".venv\Scripts\python.exe" (
+    echo Using project virtual environment...
+    set "PYTHON_CMD=.venv\Scripts\python.exe"
+) else (
+    set "PYTHON_CMD=python"
+)
 
-python main.py
+echo Starting application...
+%PYTHON_CMD% main.py
 
 if errorlevel 1 (
     echo.

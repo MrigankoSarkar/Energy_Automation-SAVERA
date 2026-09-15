@@ -1,0 +1,2 @@
+FactKey,DateKey,ReportDate,MeterKey,MeterName,AreaKey,AreaName,ActiveEnergy_kWh,Unit,Status,IsWeekend,IsAnomaly,ProcessedAt
+20260915_M01,20260915,2026-09-15,M01,Chiller Plating Plant,plating,Surface Treatment & Plating Plant,141.35,kWh,OK,False,False,2026-09-15T12:03:37.528021

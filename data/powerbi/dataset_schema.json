@@ -1,0 +1,238 @@
+{
+  "name": "EnergyAutomation_EMS_Model",
+  "defaultMode": "Push",
+  "tables": [
+    {
+      "name": "Fact_EnergyConsumption",
+      "columns": [
+        {
+          "name": "FactKey",
+          "dataType": "string"
+        },
+        {
+          "name": "DateKey",
+          "dataType": "string"
+        },
+        {
+          "name": "ReportDate",
+          "dataType": "DateTime"
+        },
+        {
+          "name": "MeterKey",
+          "dataType": "string"
+        },
+        {
+          "name": "MeterName",
+          "dataType": "string"
+        },
+        {
+          "name": "AreaKey",
+          "dataType": "string"
+        },
+        {
+          "name": "AreaName",
+          "dataType": "string"
+        },
+        {
+          "name": "ActiveEnergy_kWh",
+          "dataType": "Double"
+        },
+        {
+          "name": "Unit",
+          "dataType": "string"
+        },
+        {
+          "name": "Status",
+          "dataType": "string"
+        },
+        {
+          "name": "IsWeekend",
+          "dataType": "Boolean"
+        },
+        {
+          "name": "IsAnomaly",
+          "dataType": "Boolean"
+        },
+        {
+          "name": "ProcessedAt",
+          "dataType": "DateTime"
+        }
+      ]
+    },
+    {
+      "name": "Dim_Date",
+      "columns": [
+        {
+          "name": "DateKey",
+          "dataType": "string"
+        },
+        {
+          "name": "Date",
+          "dataType": "DateTime"
+        },
+        {
+          "name": "Year",
+          "dataType": "Int64"
+        },
+        {
+          "name": "Month",
+          "dataType": "Int64"
+        },
+        {
+          "name": "MonthName",
+          "dataType": "string"
+        },
+        {
+          "name": "Day",
+          "dataType": "Int64"
+        },
+        {
+          "name": "DayOfWeek",
+          "dataType": "Int64"
+        },
+        {
+          "name": "DayName",
+          "dataType": "string"
+        },
+        {
+          "name": "IsWeekend",
+          "dataType": "Boolean"
+        },
+        {
+          "name": "Quarter",
+          "dataType": "Int64"
+        }
+      ]
+    },
+    {
+      "name": "Dim_Meter",
+      "columns": [
+        {
+          "name": "MeterKey",
+          "dataType": "string"
+        },
+        {
+          "name": "MeterName",
+          "dataType": "string"
+        },
+        {
+          "name": "ExcelHeader",
+          "dataType": "string"
+        },
+        {
+          "name": "AreaKey",
+          "dataType": "string"
+        },
+        {
+          "name": "RatedPower_kW",
+          "dataType": "Double"
+        },
+        {
+          "name": "NominalLoad_kWh",
+          "dataType": "Double"
+        },
+        {
+          "name": "Category",
+          "dataType": "string"
+        }
+      ]
+    },
+    {
+      "name": "Dim_Area",
+      "columns": [
+        {
+          "name": "AreaKey",
+          "dataType": "string"
+        },
+        {
+          "name": "AreaName",
+          "dataType": "string"
+        },
+        {
+          "name": "Section",
+          "dataType": "string"
+        },
+        {
+          "name": "Building",
+          "dataType": "string"
+        },
+        {
+          "name": "NominalDaily_kWh",
+          "dataType": "Double"
+        },
+        {
+          "name": "TargetEfficiency",
+          "dataType": "string"
+        }
+      ]
+    },
+    {
+      "name": "Dim_Report",
+      "columns": [
+        {
+          "name": "ReportId",
+          "dataType": "Int64"
+        },
+        {
+          "name": "ReportDate",
+          "dataType": "DateTime"
+        },
+        {
+          "name": "AttachmentName",
+          "dataType": "string"
+        },
+        {
+          "name": "AttachmentHash",
+          "dataType": "string"
+        },
+        {
+          "name": "MeterCount",
+          "dataType": "Int64"
+        },
+        {
+          "name": "MappedCount",
+          "dataType": "Int64"
+        },
+        {
+          "name": "TotalEnergy_kWh",
+          "dataType": "Double"
+        },
+        {
+          "name": "ExcelStatus",
+          "dataType": "string"
+        },
+        {
+          "name": "PowerBIStatus",
+          "dataType": "string"
+        },
+        {
+          "name": "ProcessedAt",
+          "dataType": "DateTime"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "name": "Rel_Fact_Date",
+      "fromTable": "Fact_EnergyConsumption",
+      "fromColumn": "DateKey",
+      "toTable": "Dim_Date",
+      "toColumn": "DateKey"
+    },
+    {
+      "name": "Rel_Fact_Meter",
+      "fromTable": "Fact_EnergyConsumption",
+      "fromColumn": "MeterKey",
+      "toTable": "Dim_Meter",
+      "toColumn": "MeterKey"
+    },
+    {
+      "name": "Rel_Fact_Area",
+      "fromTable": "Fact_EnergyConsumption",
+      "fromColumn": "AreaKey",
+      "toTable": "Dim_Area",
+      "toColumn": "AreaKey"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+MeterKey,MeterName,ExcelHeader,AreaKey,RatedPower_kW,NominalLoad_kWh,Category
+M01,Chiller Plating Plant,Chiller Plating Plant,plating,45.0,150.0,Process Chiller
+M02,Old LT Panel Main Incomer,Old LT Panel Main Incomer,main_power,500.0,3200.0,Main Incomer
+M03,Packing & Stiching Line,Packing & Stiching Line,packaging,60.0,480.0,Packaging Line
+M04,Rigga Line Fabrication,Rigga Line Fabrication,fabrication,30.0,180.0,Welding Line
+M05,Press & Fabrication,Press & Fabrication,fabrication,150.0,1000.0,Stamping Press
+M06,Powder Coating,Powder Coating,coating,250.0,2000.0,Infrared Oven
+M07,New Plating Plant,New Plating Plant,plating,80.0,5.0,Electroplating
+M08,Old Plating Plant,Old Plating Plant,plating,80.0,5.0,Electroplating
+M09,Kaeser ASD 60 40HP Air Compressor,Kaeser ASD 60 40HP Air Compressor,compressors,30.0,780.0,Screw Compressor
+M10,ELGI E18 25HP Air Compressor,ELGI E18 25HP Air Compressor,compressors,18.5,5.0,Screw Compressor
+M11,ELGI E45 60HP Air Compressor,ELGI E45 60HP Air Compressor,compressors,45.0,1010.0,Screw Compressor
+M12,DIPP_PT_PANEĹ,DIPP_PT_PANEĹ,plating,15.0,5.0,Pre-treatment
+M13,Annealing Furnance,Annealing Furnance,fabrication,50.0,0.0,Heat Treatment
+M14,RO Plant,RO Plant,water_treatment,45.0,420.0,Water Treatment
+M15,DM Plant,DM Plant,water_treatment,10.0,5.0,Demineralizer
+M16,RASKOG,RASKOG,fabrication,20.0,0.0,Auxiliary Fabrication
