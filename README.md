@@ -238,7 +238,70 @@ python -m pytest tests/unit/test_excel_service.py -v
 
 ---
 
-## 7. Project Directory Structure
+## 7. Streamlit BI Dashboard with Live Cloud Excel Synchronization
+
+EnergyAutomation includes a modern, dedicated **Streamlit Business Intelligence Dashboard** located in `streamlit_app/`. It serves as the **read-only management analytics and visualization layer**, decoupled from the core automation engine.
+
+### Architectural Invariant & Separation of Concerns
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                 EnergyAutomation Desktop Core               │
+│  (Gmail -> PDF Extraction -> Validation -> Excel Updating)  │
+│                   [SOLE SOURCE OF TRUTH]                    │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Saves Excel
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│          Cloud Storage Transport / Shared Drive             │
+│        (Google Drive • OneDrive • Dropbox • Direct URL)     │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Read-Only Direct Download
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Streamlit BI Dashboard Layer                   │
+│   (Read-Only Analytics • Plotly Trends • Executive KPIs)    │
+│                 [ZERO-WRITING TO EXCEL]                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **EnergyAutomation Core**: The existing desktop application remains the **sole source of truth** responsible for fetching emails, parsing NBSense PDFs, validating readings, updating `Test_BI_Analysis_Report_2026.xlsx`, and maintaining the SQLite audit trail.
+2. **Streamlit BI Layer**: Strictly a **read-only consumption layer**. It **never writes to Excel, modifies readings, or alters backend logic**.
+3. **Formula & N/A Safety**: Excel formula `=SUM(C16:Q16)` and row 4 cumulative formulas are never modified. Disconnected or unpolled meters (`N/A`) are preserved as `NaN` and are never coerced to `0.0`.
+
+### Dual Operating Modes
+- **Local Storage Mode (`DATA_SOURCE = "local"`)**: Reads the Excel file directly from the filesystem (`Test_BI_Analysis_Report_2026.xlsx`). Ideal for offline plant workstations, local testing, and desktop analytics.
+- **Cloud Synchronization Mode (`DATA_SOURCE = "cloud"`)**: Downloads the workbook from Google Drive, OneDrive, or Dropbox via direct download endpoints, with intelligent caching (`CACHE_TTL`), auto-refresh (`REFRESH_INTERVAL`), and data freshness tracking (`● LIVE`, `● RECENT`, `● STALE`, `● UNAVAILABLE`).
+
+### Supported Cloud Providers
+- **Google Drive**: Sharing links (`/file/d/ID/view`, `?id=ID`, Google Sheets) automatically translated to direct download endpoints (`uc?export=download&id=ID`).
+- **Microsoft OneDrive / SharePoint**: Personal sharing links (`1drv.ms`), SharePoint documents, and business accounts converted via Microsoft Graph public share endpoints or `download=1`.
+- **Dropbox**: Sharing links (`dl=0`) automatically converted to direct binary streams (`dl=1`).
+- **Direct URL / Internal Server**: Direct HTTP/HTTPS pre-signed links.
+
+### How to Launch the Streamlit Dashboard
+```bash
+# Method 1: Using the convenient Windows Batch Launcher
+run_streamlit.bat
+
+# Method 2: Command Line (prioritizing virtual environment)
+.\.venv\Scripts\streamlit run streamlit_app/app.py
+
+# Method 3: Headless / Custom Port
+streamlit run streamlit_app/app.py --server.port 8501 --server.headless true
+```
+
+### Dashboard Views & Analytics Capabilities
+1. **📊 Executive Overview**: High-level KPIs (Latest Day consumption, DoD variance, MTD total, daily average, peak day, operational meter count), daily consumption bar chart with 7-day moving average, top consumers donut chart, and incomer balance.
+2. **📈 Energy Trends & Patterns**: Date range picker filter, multi-meter overlay selection, cumulative energy growth curve, and weekday vs weekend profile analysis.
+3. **⚡ Meter Rankings & Pareto**: Submeter rankings (Top 5, Top 10, All), Pareto 80/20 cumulative share curve, and single-equipment deep dive with daily historical profile.
+4. **🏭 Production Areas & Topology**: 7 official Savera MS production zones (`Surface Treatment & Plating`, `Finishing & Powder Coating`, `Press & Fabrication`, `Compressed Air Generation`, `RO & DM Water Treatment`, `Packaging & Stitching`, `Main Power Substation`). Compares actual consumption against nominal engineering baselines with status badges (`NORMAL`, `WARNING`, `HIGH`, `INACTIVE`).
+5. **🔍 Data Quality & Reconciliation**: Audits time series continuity, detects missing dates, evaluates distribution losses (Incomer vs Submeters), and verifies invariant adherence.
+6. **📋 Engineering Data Grid**: Complete searchable table with date and meter filtering, template row toggling, and single-click **CSV Export**.
+7. **ℹ️ System Architecture**: Interactive architecture diagrams, data pipeline documentation, and live runtime configuration metadata.
+
+---
+
+## 8. Project Directory Structure
 
 ```text
 EnergyAutomation_new/

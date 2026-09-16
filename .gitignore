@@ -35,6 +35,7 @@ ehthumbs.db
 .env
 .env.*
 secrets/
+.streamlit/secrets.toml
 credentials/*.json
 credentials/**/*.json
 credentials/**/*.pickle
