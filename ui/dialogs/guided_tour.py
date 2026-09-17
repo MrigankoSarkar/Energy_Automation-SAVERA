@@ -34,7 +34,7 @@ TOUR_STOPS: List[Dict[str, str]] = [
         "title": "Welcome to EnergyAutomation",
         "icon": "⚡",
         "what": "EnergyAutomation is an enterprise Energy Management System (EMS) desktop platform built for Savera MS.",
-        "why": "It eliminates manual daily Excel keying by automatically downloading NBSense reports from Gmail, validating readings, preserving Excel formulas, and publishing Power BI datasets.",
+        "why": "It eliminates manual daily Excel keying by automatically downloading NBSense reports from Gmail, validating readings, preserving Excel formulas, and delivering real-time executive analytics via Streamlit BI.",
         "how": "Follow this brief 1-minute guided tour to explore the major capabilities of the platform.",
     },
     {
@@ -47,7 +47,7 @@ TOUR_STOPS: List[Dict[str, str]] = [
     {
         "title": "2. System Health Matrix",
         "icon": "🩺",
-        "what": "Live subsystem monitor tracking Gmail, EMS Reports, Excel, Automation Scheduler, Gemini AI, and Power BI.",
+        "what": "Live subsystem monitor tracking Gmail, EMS Reports, Excel, Automation Scheduler, Gemini AI, and Streamlit BI.",
         "why": "Clearly distinguishes healthy systems from services requiring credentials or attention.",
         "how": "Review the status dots. Click 'Configure...' on any warning badge to resolve credentials or connection settings.",
     },
@@ -94,11 +94,11 @@ TOUR_STOPS: List[Dict[str, str]] = [
         "how": "Type a query or click suggested prompt chips. Note: AI is strictly read-only and never modifies Excel formulas.",
     },
     {
-        "title": "9. Power BI & Star Schema",
+        "title": "9. Streamlit Management BI",
         "icon": "📈",
-        "what": "Automated Star Schema dimensional exporter (Fact_EnergyConsumption, Dim_Date, Dim_Meter, Dim_Area, Dim_Report) and DAX measures.",
-        "why": "Prepares clean dimensional tables ready for Power BI Desktop import or Microsoft Fabric cloud push.",
-        "how": "Click 'Export Star-Schema & DAX Files' to generate ready-to-use CSVs and DAX code in data/powerbi/.",
+        "what": "Real-time, interactive cloud or local web analytics dashboard reading directly from your synchronized Excel workbook.",
+        "why": "Provides executives, plant heads, and engineers with KPI gauges, load duration curves, and shift breakdowns from any browser or mobile device without risking Excel formula corruption.",
+        "how": "Navigate to the Streamlit BI page, click 'Launch in Browser' to open http://localhost:8501, or start the local background server.",
     },
     {
         "title": "10. Processing History & Logs",
@@ -140,6 +140,15 @@ class GuidedTourDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("EnergyAutomation — Interactive Guided Tour")
         self.resize(680, 460)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #ffffff;
+                color: #0f172a;
+            }
+            QLabel {
+                color: #0f172a;
+            }
+        """)
         self.current_idx = 0
         self.total_stops = len(TOUR_STOPS)
         self._build_ui()
@@ -162,6 +171,13 @@ class GuidedTourDialog(QDialog):
 
         # Content card
         self.card = ElevatedCardWidget(self)
+        self.card.setStyleSheet("""
+            ElevatedCardWidget {
+                background-color: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+            }
+        """)
         card_lay = QVBoxLayout(self.card)
         card_lay.setContentsMargins(20, 18, 20, 18)
         card_lay.setSpacing(12)
@@ -172,6 +188,7 @@ class GuidedTourDialog(QDialog):
         header_box.addWidget(self.lbl_icon)
 
         self.lbl_title = TitleLabel(TOUR_STOPS[0]["title"], self.card)
+        self.lbl_title.setStyleSheet("color: #0f172a; font-weight: 700;")
         header_box.addWidget(self.lbl_title)
         header_box.addStretch()
         card_lay.addLayout(header_box)
@@ -180,18 +197,21 @@ class GuidedTourDialog(QDialog):
         card_lay.addWidget(self._create_section_hdr("WHAT IS THIS?"))
         self.lbl_what = BodyLabel(TOUR_STOPS[0]["what"], self.card)
         self.lbl_what.setWordWrap(True)
+        self.lbl_what.setStyleSheet("color: #334155; font-size: 10pt; line-height: 1.4;")
         card_lay.addWidget(self.lbl_what)
 
         # Section: Why
         card_lay.addWidget(self._create_section_hdr("WHY IS IT USEFUL?"))
         self.lbl_why = BodyLabel(TOUR_STOPS[0]["why"], self.card)
         self.lbl_why.setWordWrap(True)
+        self.lbl_why.setStyleSheet("color: #334155; font-size: 10pt; line-height: 1.4;")
         card_lay.addWidget(self.lbl_why)
 
         # Section: How
         card_lay.addWidget(self._create_section_hdr("HOW DO I USE IT?"))
         self.lbl_how = BodyLabel(TOUR_STOPS[0]["how"], self.card)
         self.lbl_how.setWordWrap(True)
+        self.lbl_how.setStyleSheet("color: #334155; font-size: 10pt; line-height: 1.4;")
         card_lay.addWidget(self.lbl_how)
 
         card_lay.addStretch()

@@ -32,6 +32,137 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import PrimaryPushButton, PushButton, TransparentPushButton
 
 
+class FluentNumberBox(QWidget):
+    """
+    Windows 11 Fluent Design Numeric Stepper with custom, highly responsive
+    increase [+] and decrease [−] buttons and direct numeric input.
+    """
+
+    def __init__(
+        self,
+        min_val: int = 0,
+        max_val: int = 10000,
+        default_val: int = 0,
+        step: int = 1,
+        suffix: str = "",
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._min = min_val
+        self._max = max_val
+        self._step = step
+        self._val = default_val
+        self._suffix = suffix
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        # Decrease Button [−]
+        self.btn_dec = QPushButton("−", self)
+        self.btn_dec.setFixedSize(36, 32)
+        self.btn_dec.setCursor(Qt.PointingHandCursor)
+        self.btn_dec.setStyleSheet("""
+            QPushButton {
+                font-size: 15pt;
+                font-weight: 700;
+                background-color: #f1f5f9;
+                color: #0f172a;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+                border-color: #94a3b8;
+            }
+            QPushButton:pressed {
+                background-color: #cbd5e1;
+            }
+        """)
+        self.btn_dec.clicked.connect(self._decrease)
+        lay.addWidget(self.btn_dec)
+
+        # Value input line edit
+        self.in_val = QLineEdit(str(self._val), self)
+        self.in_val.setAlignment(Qt.AlignCenter)
+        self.in_val.setFixedWidth(80)
+        self.in_val.setFixedHeight(32)
+        self.in_val.setStyleSheet("""
+            QLineEdit {
+                font-size: 11pt;
+                font-weight: 700;
+                background-color: #ffffff;
+                color: #0f172a;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 2px;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+            }
+        """)
+        self.in_val.textChanged.connect(self._on_text_changed)
+        lay.addWidget(self.in_val)
+
+        # Increase Button [+]
+        self.btn_inc = QPushButton("+", self)
+        self.btn_inc.setFixedSize(36, 32)
+        self.btn_inc.setCursor(Qt.PointingHandCursor)
+        self.btn_inc.setStyleSheet("""
+            QPushButton {
+                font-size: 14pt;
+                font-weight: 700;
+                background-color: #f1f5f9;
+                color: #0f172a;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+                border-color: #94a3b8;
+            }
+            QPushButton:pressed {
+                background-color: #cbd5e1;
+            }
+        """)
+        self.btn_inc.clicked.connect(self._increase)
+        lay.addWidget(self.btn_inc)
+
+        if self._suffix:
+            lbl_sfx = QLabel(self._suffix, self)
+            lbl_sfx.setStyleSheet("color: #64748b; font-size: 9.5pt; font-weight: 500; margin-left: 4px;")
+            lay.addWidget(lbl_sfx)
+
+        lay.addStretch()
+
+    def value(self) -> int:
+        return self._val
+
+    def setValue(self, val: int):
+        self._val = max(self._min, min(self._max, val))
+        self.in_val.setText(str(self._val))
+
+    def setRange(self, min_val: int, max_val: int):
+        self._min = min_val
+        self._max = max_val
+        self.setValue(self._val)
+
+    def _increase(self):
+        self.setValue(self._val + self._step)
+
+    def _decrease(self):
+        self.setValue(self._val - self._step)
+
+    def _on_text_changed(self, text: str):
+        try:
+            digits = "".join(ch for ch in text if ch.isdigit() or ch == "-")
+            if digits and digits != "-":
+                parsed = int(digits)
+                self._val = max(self._min, min(self._max, parsed))
+        except ValueError:
+            pass
+
+
 class SetupWizardDialog(QDialog):
     """
     8-Step guided enterprise setup wizard for initial deployment and re-configuration.
@@ -46,6 +177,48 @@ class SetupWizardDialog(QDialog):
         self.total_steps = 8
 
         self._load_current_settings()
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #ffffff;
+                color: #0f172a;
+            }
+            QLabel {
+                color: #0f172a;
+            }
+            QLineEdit {
+                background-color: #ffffff;
+                color: #0f172a;
+                border: 1px solid #cbd5e1;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+            }
+            QSpinBox {
+                background-color: #ffffff;
+                color: #0f172a;
+                border: 1px solid #cbd5e1;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QCheckBox {
+                color: #0f172a;
+            }
+            QGroupBox {
+                font-weight: 600;
+                color: #0f172a;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
+            }
+        """)
         self._build_ui()
 
     def _load_current_settings(self):
@@ -89,7 +262,7 @@ class SetupWizardDialog(QDialog):
         self.pages.addWidget(self._create_step2_excel())
         self.pages.addWidget(self._create_step3_gmail())
         self.pages.addWidget(self._create_step4_gemini())
-        self.pages.addWidget(self._create_step5_powerbi())
+        self.pages.addWidget(self._create_step5_streamlit())
         self.pages.addWidget(self._create_step6_scheduler())
         self.pages.addWidget(self._create_step7_testing())
         self.pages.addWidget(self._create_step8_complete())
@@ -192,10 +365,10 @@ class SetupWizardDialog(QDialog):
         self.in_gmail_subject = QLineEdit(cfg_gmail.get("subject_contains", "Ems Monitoring Report"))
         form.addRow("Subject Filter Keyword:", self.in_gmail_subject)
 
-        self.in_gmail_days = QSpinBox()
-        self.in_gmail_days.setRange(1, 90)
-        self.in_gmail_days.setValue(cfg_gmail.get("search_days", 30))
-        form.addRow("Historical Gap Lookback (Days):", self.in_gmail_days)
+        self.in_gmail_days = FluentNumberBox(
+            min_val=1, max_val=90, default_val=cfg_gmail.get("search_days", 30), suffix="Days"
+        )
+        form.addRow("Historical Gap Lookback:", self.in_gmail_days)
 
         lay.addLayout(form)
 
@@ -239,32 +412,38 @@ class SetupWizardDialog(QDialog):
         lay.addStretch()
         return w
 
-    def _create_step5_powerbi(self) -> QWidget:
+    def _create_step5_streamlit(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setSpacing(10)
 
-        cfg_pbi = self.settings.get("powerbi", {})
-        self.cb_pbi_enabled = QCheckBox("Enable Power BI Cloud API Direct Publishing")
-        self.cb_pbi_enabled.setChecked(cfg_pbi.get("enabled", False))
-        lay.addWidget(self.cb_pbi_enabled)
+        cfg_st = self.settings.get("streamlit", {})
+        self.cb_st_enabled = QCheckBox("Enable Streamlit Management BI Web Analytics")
+        self.cb_st_enabled.setChecked(cfg_st.get("enabled", True))
+        lay.addWidget(self.cb_st_enabled)
 
         form = QFormLayout()
-        self.in_pbi_workspace = QLineEdit(cfg_pbi.get("workspace_id", ""))
-        self.in_pbi_workspace.setPlaceholderText("Azure Workspace GUID")
-        form.addRow("Workspace ID:", self.in_pbi_workspace)
+        self.in_st_url = QLineEdit(cfg_st.get("cloud_url", "http://localhost:8501"))
+        self.in_st_url.setPlaceholderText("e.g. http://localhost:8501 or Streamlit Community Cloud URL")
+        form.addRow("Streamlit Dashboard URL:", self.in_st_url)
 
-        self.in_pbi_dataset = QLineEdit(cfg_pbi.get("dataset_id", ""))
-        self.in_pbi_dataset.setPlaceholderText("Dataset GUID")
-        form.addRow("Dataset ID:", self.in_pbi_dataset)
+        self.in_st_cache_ttl = FluentNumberBox(
+            min_val=10, max_val=3600, default_val=cfg_st.get("cache_ttl_seconds", 300), step=30, suffix="Seconds"
+        )
+        form.addRow("Data Cache TTL:", self.in_st_cache_ttl)
+
+        self.cb_st_auto_launch = QCheckBox("Automatically launch browser when Streamlit server starts")
+        self.cb_st_auto_launch.setChecked(cfg_st.get("auto_launch_browser", True))
         lay.addLayout(form)
+        lay.addWidget(self.cb_st_auto_launch)
 
         notice = QLabel(
-            "Local Export Fallback: When cloud credentials are not supplied, the system automatically "
-            "generates clean star-schema CSVs, DAX measures, and JSON templates in `data/powerbi/` ready for Power BI Desktop."
+            "📊 Architecture Rule: Streamlit BI operates strictly read-only against your synchronized "
+            "production Excel workbook or SQLite database. It provides real-time browser analytics, executive "
+            "KPI gauges, load curves, and shift breakdowns from any browser or mobile device without risking Excel formula corruption."
         )
         notice.setWordWrap(True)
-        notice.setStyleSheet("background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; color: #92400e;")
+        notice.setStyleSheet("background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 10px; color: #1e40af;")
         lay.addWidget(notice)
         lay.addStretch()
         return w
@@ -277,10 +456,10 @@ class SetupWizardDialog(QDialog):
         cfg_auto = self.settings.get("automation", {})
         form = QFormLayout()
 
-        self.in_interval = QSpinBox()
-        self.in_interval.setRange(1, 1440)
-        self.in_interval.setValue(cfg_auto.get("check_interval_minutes", 5))
-        form.addRow("Automation Polling Interval (Minutes):", self.in_interval)
+        self.in_interval = FluentNumberBox(
+            min_val=1, max_val=1440, default_val=cfg_auto.get("check_interval_minutes", 5), step=1, suffix="Minutes"
+        )
+        form.addRow("Automation Polling Interval:", self.in_interval)
 
         self.cb_start_auto = QCheckBox("Start automation scheduler automatically on launch")
         self.cb_start_auto.setChecked(cfg_auto.get("start_automatically", True))
@@ -418,7 +597,7 @@ class SetupWizardDialog(QDialog):
             "Excel Workbook & Formula Safety",
             "Gmail Ingestion & Gap Lookback",
             "Google Gemini AI Intelligence",
-            "Power BI Analytics & Star Schema",
+            "Streamlit Management BI Analytics",
             "Automation Scheduler & Background Run",
             "Live Diagnostics & Connection Checks",
             "Confirmation & System Launch",
@@ -427,7 +606,7 @@ class SetupWizardDialog(QDialog):
         self.step_subtitle.setText(f"Step {self.current_step + 1} of {self.total_steps}")
         self.btn_back.setEnabled(self.current_step > 0)
         if self.current_step == self.total_steps - 1:
-            self.btn_next.setText("Save & Start")
+            self.btn_next.setText("Save && Start")
         else:
             self.btn_next.setText("Next →")
 
@@ -468,10 +647,11 @@ class SetupWizardDialog(QDialog):
                 "model": self.in_gemini_model.text().strip(),
                 "api_key": self.in_gemini_key.text().strip(),
             },
-            "powerbi": {
-                "enabled": self.cb_pbi_enabled.isChecked(),
-                "workspace_id": self.in_pbi_workspace.text().strip(),
-                "dataset_id": self.in_pbi_dataset.text().strip(),
+            "streamlit": {
+                "enabled": self.cb_st_enabled.isChecked(),
+                "cloud_url": self.in_st_url.text().strip(),
+                "cache_ttl_seconds": self.in_st_cache_ttl.value(),
+                "auto_launch_browser": self.cb_st_auto_launch.isChecked(),
             },
         }
 

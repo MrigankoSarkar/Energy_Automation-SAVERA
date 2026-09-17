@@ -41,7 +41,6 @@ def test_alert_service_workflow_evaluation():
         "processed": [
             {
                 "excel": None,
-                "powerbi": {"success": False, "message": "Power BI credentials unconfigured."},
                 "ai": {"status": "attention_required", "explanation": "Spike in Powder Coating."},
             }
         ],
@@ -53,5 +52,4 @@ def test_alert_service_workflow_evaluation():
     assert len(alerts) >= 2
     categories = [a.category for a in alerts]
     assert AlertCategory.WARNING.value in categories
-    assert AlertCategory.INFO.value in categories
     assert AlertCategory.AI_INSIGHT.value in categories

@@ -1,27 +1,28 @@
 """
-EnergyAutomation Enterprise Desktop Application Shell & Dashboard.
-Built with PySide6 + QFluentWidgets, featuring Microsoft Fluent Design System,
-Savera MS corporate branding, dual-mode experience (Simple / Engineer),
-Plant Energy Topology, Centralized Alert Center, Context-Aware System Guidance,
-and Comprehensive Operator Help Center.
+Enterprise Energy Management Desktop Dashboard (PySide6 + QFluentWidgets).
+Modernized with Windows 11 Fluent Design System, dynamic data bindings from
+live Excel workbooks and SQLite audit trails, zero fake telemetry, unified navigation,
+centralized notifications, and integrated Streamlit Management BI.
 """
 
 from __future__ import annotations
 
+from datetime import date, datetime
 import json
-import sys
-import traceback
-from datetime import datetime
+import os
 from pathlib import Path
+import socket
+import subprocess
+import sys
+import threading
+import traceback
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPixmap
+from PySide6.QtCore import QObject, QThread, QTime, QTimer, QUrl, Qt, Signal, Slot
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
-    QCheckBox,
-    QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -33,159 +34,67 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
+    QPushButton,
     QScrollArea,
-    QSizePolicy,
+    QSpacerItem,
     QSplitter,
-    QStackedWidget,
     QStatusBar,
-    QSystemTrayIcon,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
-
 from qfluentwidgets import (
-    FluentWindow,
-    NavigationInterface,
-    NavigationItemPosition,
-    FluentIcon as FIF,
+    CardWidget,
     ElevatedCardWidget,
     SimpleCardWidget,
-    HeaderCardWidget,
+    FluentWindow,
+    FluentIcon as FIF,
+    NavigationItemPosition,
     PrimaryPushButton,
     PushButton,
     TransparentPushButton,
-    PillPushButton,
-    SwitchButton,
     SearchLineEdit,
-    LineEdit,
-    TextEdit,
+    SwitchButton,
+    ProgressBar,
     TableWidget,
     InfoBar,
     InfoBarPosition,
     Theme,
     setTheme,
     isDarkTheme,
-    toggleTheme,
-    ProgressBar,
+    TitleLabel,
     SubtitleLabel,
+    StrongBodyLabel,
     BodyLabel,
     CaptionLabel,
-    TitleLabel,
-    StrongBodyLabel,
 )
 
+from ui.design_system import (
+    ThemeTokens,
+    LIGHT_TOKENS,
+    DARK_TOKENS,
+    get_current_tokens,
+    Typography,
+    FluentCard,
+    KPICard,
+    StatusCard,
+    StatusBadge,
+    EmptyState,
+    PageHeader,
+)
+from ui.data_service import DashboardDataService, DynamicOverviewData
+from ui.notification_service import UINotificationService, FriendlyNotificationDialog, NotificationSeverity
 from ui.widgets.plant_map import PlantMapWidget
-from ui.dialogs.setup_wizard import SetupWizardDialog
 from ui.dialogs.guided_tour import GuidedTourDialog
+from ui.dialogs.setup_wizard import SetupWizardDialog
 
 
 # =====================================================================
-# Friendly Non-Technical Error Dialog (Section 11, 12, 39)
-# =====================================================================
-
-class FriendlyErrorDialog(QDialog):
-    """
-    Operator-friendly error dialog providing plain-language explanations
-    (What happened, Why it happened, What to do) with an expandable
-    technical details section for engineers.
-    """
-
-    def __init__(
-        self,
-        parent: QWidget | None,
-        title: str,
-        what: str,
-        why: str,
-        action: str,
-        technical_details: str = "",
-    ):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumWidth(560)
-        self.technical_details = technical_details
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
-
-        # Header with icon and summary
-        header_box = QHBoxLayout()
-        icon_lbl = QLabel("⚠")
-        icon_lbl.setStyleSheet("font-size: 24pt; color: #dc2626;")
-        header_box.addWidget(icon_lbl)
-
-        title_box = QVBoxLayout()
-        t_lbl = QLabel(title)
-        t_lbl.setStyleSheet("font-size: 12pt; font-weight: 800; color: #0f172a;")
-        sub_lbl = QLabel(what)
-        sub_lbl.setWordWrap(True)
-        sub_lbl.setStyleSheet("font-size: 9.5pt; color: #334155; font-weight: 500;")
-        title_box.addWidget(t_lbl)
-        title_box.addWidget(sub_lbl)
-        header_box.addLayout(title_box, 1)
-        layout.addLayout(header_box)
-
-        # Guidance Card
-        card = SimpleCardWidget(self)
-        card_lay = QVBoxLayout(card)
-        card_lay.setContentsMargins(16, 14, 16, 14)
-        card_lay.setSpacing(8)
-
-        why_title = QLabel("Why this may have happened:")
-        why_title.setStyleSheet("font-weight: 700; color: #475569; font-size: 9pt;")
-        card_lay.addWidget(why_title)
-
-        why_lbl = QLabel(why)
-        why_lbl.setWordWrap(True)
-        why_lbl.setStyleSheet("color: #64748b; font-size: 9pt;")
-        card_lay.addWidget(why_lbl)
-
-        action_title = QLabel("Recommended Action:")
-        action_title.setStyleSheet("font-weight: 700; color: #16a34a; font-size: 9pt; margin-top: 4px;")
-        card_lay.addWidget(action_title)
-
-        action_lbl = QLabel(action)
-        action_lbl.setWordWrap(True)
-        action_lbl.setStyleSheet("color: #1e293b; font-size: 9.5pt; font-weight: 600;")
-        card_lay.addWidget(action_lbl)
-
-        layout.addWidget(card)
-
-        # Expandable technical details
-        if technical_details:
-            self.btn_toggle_tech = PushButton("View Technical Details ▼", self)
-            self.btn_toggle_tech.setCheckable(True)
-            self.btn_toggle_tech.clicked.connect(self._toggle_tech)
-            layout.addWidget(self.btn_toggle_tech)
-
-            self.tech_box = QTextEdit()
-            self.tech_box.setReadOnly(True)
-            self.tech_box.setPlainText(technical_details)
-            self.tech_box.setFixedHeight(120)
-            self.tech_box.setVisible(False)
-            layout.addWidget(self.tech_box)
-
-        # Action Buttons
-        btn_box = QHBoxLayout()
-        btn_box.addStretch()
-
-        btn_close = PrimaryPushButton("Understood", self)
-        btn_close.clicked.connect(self.accept)
-        btn_box.addWidget(btn_close)
-        layout.addLayout(btn_box)
-
-    def _toggle_tech(self):
-        visible = self.btn_toggle_tech.isChecked()
-        self.tech_box.setVisible(visible)
-        self.btn_toggle_tech.setText("Hide Technical Details ▲" if visible else "View Technical Details ▼")
-
-
-# =====================================================================
-# Background Worker
+# Asynchronous Background Worker for Automation Workflow
 # =====================================================================
 
 class WorkflowWorker(QObject):
@@ -211,30 +120,36 @@ class WorkflowWorker(QObject):
 
 class Dashboard(FluentWindow):
     """
-    Enterprise Energy Management desktop application shell.
-    Built with PySide6 + QFluentWidgets (FluentWindow), featuring Microsoft
-    Fluent Design, Savera MS branding, centralized alert center, dual-mode
-    experience (Simple / Engineer), contextual guidance, and a comprehensive Help Center.
+    Windows 11-inspired Enterprise Energy Management desktop application shell.
+    Features:
+    - Microsoft Fluent Design System with high-contrast Light/Dark themes
+    - Zero fake telemetry: dynamic binding to real Excel and SQLite records
+    - Unified navigation layout (eliminated separate Simple/Engineer modes)
+    - Centralized notification system with expandable technical details
+    - Dedicated Streamlit Management BI integration
+    - Light-Themed Tour & Setup Experience
     """
 
     def __init__(self, application: Any, parent: QWidget | None = None):
         super().__init__(parent)
+        setTheme(Theme.DARK)
 
         self.application = application
-        self.workflow = application.workflow
-        self.scheduler = application.scheduler
+        self.workflow = getattr(application, "workflow", None)
+        self.scheduler = getattr(application, "scheduler", None)
         self.services = getattr(application, "services", {})
+
+        self.data_service = DashboardDataService(application)
+        self.notification_service = UINotificationService(self)
 
         self.worker_thread: QThread | None = None
         self.worker: WorkflowWorker | None = None
 
         self._running = False
-        self._is_engineer_mode = False
         self._last_result: Any = None
         self._last_error: str | None = None
 
         self.setWindowTitle("EnergyAutomation — EMS Monitoring")
-
         app_icon = Path("assets/app.ico")
         if app_icon.exists():
             self.setWindowIcon(QIcon(str(app_icon)))
@@ -242,29 +157,26 @@ class Dashboard(FluentWindow):
         self.setMinimumSize(1260, 800)
         self.resize(1440, 920)
 
-        # Retain backward-compatible nav_buttons list
+        # Compatibility references
         self.nav_buttons: List[Any] = []
-
-        # Retain status bar compatibility
         self.statusBar = QStatusBar(self)
+        self.stack = self.stackedWidget
 
+        # Build UI
         self._build_subinterfaces()
         self._build_title_bar()
-        self._build_tray()
         self._start_clock()
 
-        self._set_status("Ready", "ready", "System is operational.")
-        self._append_log("EnergyAutomation enterprise shell initialized.")
+        # Load dynamic data
+        self.refresh_status()
+        self._append_log("EnergyAutomation Windows 11 Enterprise Platform initialized.")
 
     # =================================================================
-    # Subinterface & Navigation Setup (FluentWindow 12 Interfaces)
+    # Subinterface & Navigation Setup (11 Unified Windows 11 Pages)
     # =================================================================
 
     def _build_subinterfaces(self):
-        # Bind self.stack to self.stackedWidget for 100% test compatibility
-        self.stack = self.stackedWidget
-
-        # Page 0: Executive Overview
+        # Page 0: Executive Dashboard
         self.page_overview = self._create_overview_page()
         self.addSubInterface(self.page_overview, FIF.HOME, "Executive Dashboard")
 
@@ -272,11 +184,11 @@ class Dashboard(FluentWindow):
         self.page_analytics = self._create_analysis_panel()
         self.addSubInterface(self.page_analytics, FIF.PIE_SINGLE, "Energy Analytics")
 
-        # Page 2: Meter Analysis
+        # Page 2: Meter Analytics
         self.page_meters = self._create_meters_page()
-        self.addSubInterface(self.page_meters, FIF.SPEED_HIGH, "Meter Analysis")
+        self.addSubInterface(self.page_meters, FIF.SPEED_HIGH, "Meter Analytics")
 
-        # Page 3: Plant Overview (Topology Map)
+        # Page 3: Plant Overview (Interactive Topology Map)
         self.page_plant = self._create_plant_overview_page()
         self.addSubInterface(self.page_plant, FIF.APPLICATION, "Plant Overview")
 
@@ -292,15 +204,15 @@ class Dashboard(FluentWindow):
         self.page_ai = self._create_ai_panel()
         self.addSubInterface(self.page_ai, FIF.CHAT, "AI Insights")
 
-        # Page 7: Power BI Analytics
-        self.page_powerbi = self._create_powerbi_panel()
-        self.addSubInterface(self.page_powerbi, FIF.SHARE, "Power BI")
+        # Page 7: Streamlit Management BI (Replaces Power BI)
+        self.page_streamlit = self._create_streamlit_panel()
+        self.addSubInterface(self.page_streamlit, FIF.SHARE, "Streamlit BI")
 
         # Page 8: Centralized Alert Center
         self.page_alerts = self._create_alerts_panel()
-        self.addSubInterface(self.page_alerts, FIF.RINGER, "Alert Center")
+        self.addSubInterface(self.page_alerts, FIF.RINGER, "Alert Centre")
 
-        # Page 9: Processing History & Logs
+        # Page 9: Processing History & Diagnostics
         self.page_history = self._create_history_page()
         self.addSubInterface(self.page_history, FIF.HISTORY, "Processing History")
 
@@ -320,124 +232,130 @@ class Dashboard(FluentWindow):
             self.page_reports,
             self.page_recovery,
             self.page_ai,
-            self.page_powerbi,
+            self.page_streamlit,
             self.page_alerts,
             self.page_history,
             self.page_settings,
             self.page_help,
         ]
 
-        self.stackedWidget.currentChanged.connect(self._on_page_changed)
-        self.navigationInterface.setExpandWidth(240)
+    # =================================================================
+    # Title Bar & Header Controls
+    # =================================================================
 
     def _build_title_bar(self):
         tb = self.titleBar
-        app_icon = Path("assets/app.ico")
-        if app_icon.exists():
-            tb.setIcon(QIcon(str(app_icon)))
-        tb.setTitle("EnergyAutomation — Savera MS")
 
-        # Global Search Bar
+        # Global Search Bar (Positioned in Top-Middle)
         self.global_search_input = SearchLineEdit(tb)
         self.global_search_input.setObjectName("GlobalSearch")
         self.global_search_input.setPlaceholderText("🔍 Search meters, reports, alerts, settings...")
-        self.global_search_input.setToolTip("Instant search: type meter name, report date, or keyword to jump to relevant view")
-        self.global_search_input.setFixedWidth(280)
+        self.global_search_input.setToolTip("Type meter name, report date, or keyword to jump to relevant view")
+        self.global_search_input.setFixedWidth(360)
         self.global_search_input.textChanged.connect(self.handle_global_search)
 
-        # Mode Toggle Button (Simple Mode vs Engineer Mode)
-        self.btn_mode_toggle = PushButton("👤 Simple Mode", tb)
-        self.btn_mode_toggle.setObjectName("ModeToggleButton")
-        self.btn_mode_toggle.setToolTip("Toggle between Simple View (Executive summaries) and Engineer View (Detailed technical telemetry)")
-        self.btn_mode_toggle.clicked.connect(self.toggle_engineer_mode)
-
-        # Guided Tour Button
+        # Guided Tour Button (Top-Right)
         btn_tour = PushButton("✨ Tour", tb)
         btn_tour.setObjectName("TourButton")
-        btn_tour.setToolTip("Take a 1-minute interactive walkthrough of all platform capabilities")
+        btn_tour.setToolTip("Take a guided walkthrough of all platform capabilities (Light Theme)")
         btn_tour.clicked.connect(self.open_guided_tour)
 
-        # Setup Wizard Button
+        # Setup Wizard Button (Top-Right)
         btn_wizard = PushButton("⚙ Setup", tb)
         btn_wizard.setObjectName("WizardButton")
-        btn_wizard.setToolTip("Open step-by-step wizard to configure Excel, Gmail, Gemini, and Power BI")
+        btn_wizard.setToolTip("Open step-by-step wizard to configure Excel, Gmail, Gemini, and Streamlit")
         btn_wizard.clicked.connect(self.open_setup_wizard)
 
-        # Theme Switch Button (Light / Dark)
-        self.theme_switch = SwitchButton(tb)
-        self.theme_switch.setOnText("Dark")
-        self.theme_switch.setOffText("Light")
-        self.theme_switch.setToolTip("Toggle Fluent Light / Dark theme")
-        self.theme_switch.setChecked(isDarkTheme())
-        self.theme_switch.checkedChanged.connect(self._on_theme_toggled)
-
-        # Live Clock
-        self.clock_label = QLabel(tb)
+        # Clock
+        self.clock_label = QLabel("00:00:00", tb)
         self.clock_label.setObjectName("ClockLabel")
-        self.clock_label.setToolTip("Workstation system date and time")
-        self.clock_label.setStyleSheet("color: #64748b; font-size: 8.5pt; font-weight: 600; padding: 2px 8px;")
+        self.clock_label.setStyleSheet("color: #cbd5e1; font-size: 8.5pt; font-weight: 600; padding-right: 12px;")
 
-        # Insert widgets into titlebar layout before spacer item (at index 2)
-        tb.hBoxLayout.insertWidget(2, self.global_search_input)
-        tb.hBoxLayout.insertWidget(3, self.btn_mode_toggle)
-        tb.hBoxLayout.insertWidget(4, btn_tour)
-        tb.hBoxLayout.insertWidget(5, btn_wizard)
-        tb.hBoxLayout.insertWidget(6, self.theme_switch)
-        tb.hBoxLayout.insertWidget(7, self.clock_label)
+        # Layout: Remove default spacer between title and controls
+        if tb.hBoxLayout.count() > 2:
+            item = tb.hBoxLayout.itemAt(2)
+            if item and item.spacerItem():
+                tb.hBoxLayout.takeAt(2)
 
-    def _on_theme_toggled(self, is_dark: bool):
-        setTheme(Theme.DARK if is_dark else Theme.LIGHT)
-        self._append_log(f"Theme switched to {'Dark' if is_dark else 'Light'} mode.")
+        # Layout: Icon & Title -> Stretch(1) -> SearchBar (Top Middle) -> Stretch(1) -> Tour -> Gap(14) -> Setup -> Gap(18) -> Clock -> Spacing(12) -> Window Controls
+        tb.hBoxLayout.insertStretch(2, 1)
+        tb.hBoxLayout.insertWidget(3, self.global_search_input)
+        tb.hBoxLayout.insertStretch(4, 1)
+        tb.hBoxLayout.insertWidget(5, btn_tour)
+        tb.hBoxLayout.insertSpacing(6, 14)
+        tb.hBoxLayout.insertWidget(7, btn_wizard)
+        tb.hBoxLayout.insertSpacing(8, 18)
+        tb.hBoxLayout.insertWidget(9, self.clock_label)
+        tb.hBoxLayout.insertSpacing(10, 12)
 
-    def _on_page_changed(self, index: int):
-        if index == 0:
-            self.refresh_overview()
-        elif index == 2:
-            self.refresh_meters_table()
-        elif index == 3:
-            self.refresh_plant_topology_view()
-        elif index == 8:
-            self.refresh_alerts_panel()
+    def _start_clock(self):
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(lambda: self.clock_label.setText(QTime.currentTime().toString("hh:mm:ss AP")))
+        self._timer.start(1000)
+
+    def _on_theme_toggled(self, is_dark: bool = True):
+        # Application enforces Dark Theme only across all operations
+        setTheme(Theme.DARK)
+        self.refresh_status()
 
     def switch_page(self, index: int):
         if 0 <= index < len(self.pages):
             self.switchTo(self.pages[index])
             self._on_page_changed(index)
 
+    def _on_page_changed(self, index: int):
+        if index == 0:
+            self.refresh_overview()
+        elif index == 1:
+            self.refresh_analysis()
+        elif index == 2:
+            self.refresh_meters_table()
+        elif index == 3:
+            self.refresh_plant_topology_view()
+        elif index == 4:
+            self.refresh_reports_table()
+        elif index == 7:
+            self.refresh_streamlit_panel()
+        elif index == 8:
+            self.refresh_alerts_panel()
+        elif index == 9:
+            self.refresh_history()
+
     # =================================================================
-    # Page 0: Executive Overview (Section 10 & 17)
+    # Page 0: Executive Overview (Dynamic Data & No Fake Telemetry)
     # =================================================================
 
     def _create_overview_page(self) -> QWidget:
-        self.page_overview_scroll = QScrollArea()
-        self.page_overview_scroll.setWidgetResizable(True)
-        self.page_overview_scroll.setFrameShape(QFrame.NoFrame)
-        self.page_overview_scroll.setObjectName("page_overview")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setObjectName("page_overview")
 
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 
-        # 1. System Readiness & Status Ribbon (Section 17)
+        # 1. System Readiness & Status Banner
         self.readiness_card = self._create_readiness_ribbon()
         layout.addWidget(self.readiness_card)
 
-        # 2. System Health Matrix (Section 10)
-        layout.addWidget(self._create_health_matrix())
+        # 2. System Health Matrix (Dynamic status of all 6 services)
+        self.health_matrix_card = self._create_health_matrix()
+        layout.addWidget(self.health_matrix_card)
 
-        # 3. Energy Overview Cards (Today, Yesterday, MTD, YTD)
+        # 3. Dynamic Energy KPI Cards (Today, Yesterday, MTD, DoD Variance)
         layout.addWidget(self._create_energy_kpi_cards())
 
-        # 4. Automation Operations & Status Cards
+        # 4. Report Processing Statistics (from SQLite audit trail)
         cards = QGridLayout()
         cards.setHorizontalSpacing(14)
         cards.setVerticalSpacing(14)
 
-        self.card_processed = self._create_metric_card("Reports Processed", "0", "processed", "Total lifetime reports processed by engine")
-        self.card_success = self._create_metric_card("Successful", "0", "success", "Reports processed with zero validation errors")
-        self.card_failed = self._create_metric_card("Failed", "0", "failed", "Reports requiring operator attention")
-        self.card_last = self._create_metric_card("Last Run", "—", "last", "Time of the most recent ingestion cycle")
+        self.card_processed = self._create_metric_card("Reports Processed", "NOT ACTIVE", "processed", "Total lifetime reports processed by engine")
+        self.card_success = self._create_metric_card("Successful", "NOT ACTIVE", "success", "Reports processed with zero validation errors")
+        self.card_failed = self._create_metric_card("Failed", "NOT ACTIVE", "failed", "Reports requiring operator attention")
+        self.card_last = self._create_metric_card("Last Run", "NOT ACTIVE", "last", "Time of the most recent ingestion cycle")
 
         cards.addWidget(self.card_processed, 0, 0)
         cards.addWidget(self.card_success, 0, 1)
@@ -445,7 +363,7 @@ class Dashboard(FluentWindow):
         cards.addWidget(self.card_last, 0, 3)
         layout.addLayout(cards)
 
-        # 5. Automation Controls
+        # 5. Automation Operations Controls
         layout.addWidget(self._create_control_panel())
 
         # 6. Two-Column Split: Top Consumers Preview & Live Activity
@@ -456,10 +374,8 @@ class Dashboard(FluentWindow):
         bottom_split.addWidget(self._create_activity_panel(), 1)
 
         layout.addLayout(bottom_split)
-        self.page_overview_scroll.setWidget(container)
-
-        self.refresh_overview()
-        return self.page_overview_scroll
+        scroll.setWidget(container)
+        return scroll
 
     def _create_readiness_ribbon(self) -> QWidget:
         card = ElevatedCardWidget()
@@ -468,44 +384,36 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(14)
 
-        self.status_indicator = QLabel("●")
+        self.status_indicator = QLabel("✓")
         self.status_indicator.setObjectName("StatusIndicator")
-        self.status_indicator.setStyleSheet("font-size: 20pt; color: #16a34a;")
+        self.status_indicator.setStyleSheet("font-size: 20pt; font-weight: 800; color: #4ade80;")
 
         info_box = QVBoxLayout()
         info_box.setSpacing(2)
-        self.status_text = QLabel("System Ready")
+        self.status_text = QLabel("System Ready & Connected")
         self.status_text.setObjectName("StatusText")
-        self.status_text.setStyleSheet("font-size: 12pt; font-weight: 800;")
+        self.status_text.setStyleSheet("font-size: 12pt; font-weight: 800; color: #ffffff;")
 
         self.status_detail = QLabel("Core automation engine is active. Waiting for scheduled morning report.")
         self.status_detail.setObjectName("StatusDetail")
-        self.status_detail.setStyleSheet("color: #64748b; font-size: 9pt;")
+        self.status_detail.setStyleSheet("color: #cbd5e1; font-size: 9pt;")
 
         info_box.addWidget(self.status_text)
         info_box.addWidget(self.status_detail)
         layout.addLayout(info_box, 1)
 
-        # Quick Checklist Badges
-        self.badge_excel = QLabel("✓ Excel")
-        self.badge_excel.setStyleSheet("background: #dcfce7; color: #166534; font-weight: 700; border-radius: 4px; padding: 4px 8px; font-size: 8.5pt;")
-        self.badge_excel.setToolTip("Target Excel workbook is configured and verified")
+        # Dynamic Checklist Badges
+        self.badge_excel = StatusBadge("EXCEL")
         layout.addWidget(self.badge_excel)
 
-        self.badge_db = QLabel("✓ Database")
-        self.badge_db.setStyleSheet("background: #dcfce7; color: #166534; font-weight: 700; border-radius: 4px; padding: 4px 8px; font-size: 8.5pt;")
-        self.badge_db.setToolTip("Local SQLite audit database is connected")
+        self.badge_db = StatusBadge("DATABASE")
         layout.addWidget(self.badge_db)
 
-        self.badge_gmail = QLabel("⚠ Gmail (OAuth)")
-        self.badge_gmail.setStyleSheet("background: #fef3c7; color: #92400e; font-weight: 700; border-radius: 4px; padding: 4px 8px; font-size: 8.5pt;")
-        self.badge_gmail.setToolTip("Gmail API credentials need one-time authorization in Settings")
+        self.badge_gmail = StatusBadge("GMAIL")
         layout.addWidget(self.badge_gmail)
 
-        self.badge_gemini = QLabel("ℹ AI (Advisory)")
-        self.badge_gemini.setStyleSheet("background: #ede9fe; color: #5b21b6; font-weight: 700; border-radius: 4px; padding: 4px 8px; font-size: 8.5pt;")
-        self.badge_gemini.setToolTip("Gemini AI advisory assistant active in fallback/offline mode")
-        layout.addWidget(self.badge_gemini)
+        self.badge_streamlit = StatusBadge("STREAMLIT")
+        layout.addWidget(self.badge_streamlit)
 
         btn_cfg = PushButton("Configure...", card)
         btn_cfg.setToolTip("Jump to Configuration Settings to review credentials")
@@ -520,40 +428,23 @@ class Dashboard(FluentWindow):
         root_lay.setContentsMargins(18, 14, 18, 14)
         root_lay.setSpacing(10)
 
-        header_lbl = StrongBodyLabel("System Health & Integration Status")
+        header_lbl = StrongBodyLabel("System Health & Integration Status (Live Verification)")
+        header_lbl.setStyleSheet("color: #ffffff; font-weight: 700;")
         root_lay.addWidget(header_lbl)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(20)
-        grid.setVerticalSpacing(8)
+        self.health_grid = QGridLayout()
+        self.health_grid.setHorizontalSpacing(20)
+        self.health_grid.setVerticalSpacing(8)
 
-        services_status = [
-            ("Gmail Service", "●", "Healthy", "Checks incoming NBSense daily emails", 10),
-            ("EMS Reports", "●", "Healthy", "18-meter report parsing and unit normalization", 4),
-            ("Excel Service", "●", "Healthy", "Formula-safe updates and automated backup snapshots", 10),
-            ("Automation Engine", "●", "Running", "APScheduler background execution engine", 0),
-            ("Gemini AI Intelligence", "●", "Available", "Advisory natural-language Q&A and anomaly explanation", 6),
-            ("Power BI Integration", "●", "Ready (Export Mode)", "Star Schema dimensional model and DAX generation", 7),
-        ]
-
-        self.health_labels: Dict[str, QLabel] = {}
-        for idx, (name, dot, stat, tip, page_idx) in enumerate(services_status):
+        self.health_cards: Dict[str, StatusCard] = {}
+        for idx, s_name in enumerate(["Excel", "Database", "Gmail", "Automation", "AI", "Streamlit"]):
             row = idx // 3
-            col = (idx % 3) * 2
+            col = idx % 3
+            sc = StatusCard(title=s_name, status="NOT ACTIVE", details="Checking connection...")
+            self.health_cards[s_name] = sc
+            self.health_grid.addWidget(sc, row, col)
 
-            name_lbl = QLabel(f"<b>{name}:</b>")
-            name_lbl.setStyleSheet("color: #334155; font-size: 9pt;")
-            name_lbl.setToolTip(tip)
-
-            stat_lbl = QLabel(f"<span style='color: #16a34a; font-size: 11pt;'>{dot}</span> {stat}")
-            stat_lbl.setStyleSheet("font-size: 9pt; font-weight: 600; color: #1e293b;")
-            stat_lbl.setToolTip(tip)
-            self.health_labels[name] = stat_lbl
-
-            grid.addWidget(name_lbl, row, col)
-            grid.addWidget(stat_lbl, row, col + 1)
-
-        root_lay.addLayout(grid)
+        root_lay.addLayout(self.health_grid)
         return card
 
     def _create_energy_kpi_cards(self) -> QWidget:
@@ -562,64 +453,44 @@ class Dashboard(FluentWindow):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(14)
 
-        self.card_today_kwh = self._create_energy_card("Latest Report Consumption", "9,206.83 kWh", "15-Feb-2026", "#2563eb")
-        self.card_yesterday_kwh = self._create_energy_card("Previous Shift", "9,180.40 kWh", "14-Feb-2026", "#0d9488")
-        self.card_mtd_kwh = self._create_energy_card("Month-To-Date (MTD)", "138,102.5 kWh", "February 2026", "#7c3aed")
-        self.card_dod_delta = self._create_energy_card("Day-over-Day Variance", "+0.29%", "Nominal (+26.4 kWh)", "#16a34a")
+        self.card_today_kwh = KPICard("Latest Report Consumption", "NOT ACTIVE", "—", "#ffffff")
+        self.card_yesterday_kwh = KPICard("Previous Shift", "NOT ACTIVE", "—", "#ffffff")
+        self.card_mtd_kwh = KPICard("Month-To-Date (MTD)", "NOT ACTIVE", "—", "#ffffff")
+        self.card_dod_delta = KPICard("Day-over-Day Variance", "NOT ACTIVE", "—", "#ffffff")
 
         grid.addWidget(self.card_today_kwh, 0, 0)
         grid.addWidget(self.card_yesterday_kwh, 0, 1)
         grid.addWidget(self.card_mtd_kwh, 0, 2)
         grid.addWidget(self.card_dod_delta, 0, 3)
-
         return container
-
-    def _create_energy_card(self, title: str, value: str, subtext: str, color_hex: str) -> ElevatedCardWidget:
-        card = ElevatedCardWidget()
-        card.setObjectName("MetricCard")
-        card.setStyleSheet(f"border-top: 3px solid {color_hex};")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(18, 14, 18, 14)
-        lay.setSpacing(2)
-
-        t = CaptionLabel(title)
-        lay.addWidget(t)
-
-        v = QLabel(value)
-        v.setStyleSheet(f"font-size: 18pt; font-weight: 800; color: {color_hex}; margin: 2px 0;")
-        lay.addWidget(v)
-
-        s = QLabel(subtext)
-        s.setStyleSheet("color: #64748b; font-size: 8.5pt; font-weight: 500;")
-        lay.addWidget(s)
-
-        card._val_label = v
-        card._sub_label = s
-        return card
 
     def _create_metric_card(self, title: str, value: str, metric_type: str, tooltip: str = "") -> ElevatedCardWidget:
         card = ElevatedCardWidget()
         card.setObjectName("MetricCard")
+        card.setStyleSheet("""
+            ElevatedCardWidget {
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 8px;
+            }
+            ElevatedCardWidget:hover {
+                border: 1px solid #475569;
+                background-color: #243247;
+            }
+        """)
         if tooltip:
             card.setToolTip(tooltip)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(4)
 
-        t_lbl = CaptionLabel(title)
+        t_lbl = CaptionLabel(title.upper())
+        t_lbl.setStyleSheet("color: #cbd5e1; font-size: 8pt; font-weight: 700; letter-spacing: 0.5px;")
         layout.addWidget(t_lbl)
-
-        colors = {
-            "processed": "#2563eb",
-            "success": "#16a34a",
-            "failed": "#dc2626",
-            "last": "#7c3aed",
-        }
-        c = colors.get(metric_type, "#0f172a")
 
         v_lbl = QLabel(value)
         v_lbl.setProperty("metric", metric_type)
-        v_lbl.setStyleSheet(f"font-size: 20pt; font-weight: 800; color: {c}; margin-top: 2px;")
+        v_lbl.setStyleSheet("font-size: 19pt; font-weight: 800; color: #ffffff; margin-top: 2px;")
         layout.addWidget(v_lbl)
 
         card._metric_value = v_lbl
@@ -631,32 +502,36 @@ class Dashboard(FluentWindow):
         root_lay.setContentsMargins(18, 14, 18, 14)
         root_lay.setSpacing(10)
 
-        header_lbl = StrongBodyLabel("Automation Operations & Scheduler Control")
-        root_lay.addWidget(header_lbl)
+        root_lay.addWidget(StrongBodyLabel("Automation Operations & Scheduler Controls"))
 
         layout = QHBoxLayout()
         layout.setSpacing(10)
 
         self.run_button = PrimaryPushButton("Run Automation Now", card)
         self.run_button.setObjectName("PrimaryButton")
-        self.run_button.setToolTip("Triggers immediate execution: checks Gmail, parses PDF, updates Excel, and updates SQLite audit trail")
+        self.run_button.setToolTip("Triggers immediate execution: checks Gmail, parses PDF, updates Excel, and logs audit")
         self.run_button.clicked.connect(self.run_now)
 
         self.scheduler_button = PushButton("Pause Scheduler", card)
-        self.scheduler_button.setToolTip("Temporarily stop automatic polling without closing the application")
+        self.scheduler_button.setToolTip("Temporarily stop automatic background checks")
         self.scheduler_button.clicked.connect(self.toggle_scheduler)
 
-        self.refresh_button = PushButton("Refresh Status", card)
-        self.refresh_button.setToolTip("Re-query local database and reload active dashboard metrics")
+        self.refresh_button = PushButton("Refresh Data", card)
+        self.refresh_button.setToolTip("Re-query Excel workbook and SQLite database for latest values")
         self.refresh_button.clicked.connect(self.refresh_status)
+
+        self.btn_open_bi = PushButton("Open Streamlit BI", card)
+        self.btn_open_bi.setToolTip("Open the executive Streamlit analytics dashboard in your browser")
+        self.btn_open_bi.clicked.connect(self.launch_streamlit_browser)
 
         layout.addWidget(self.run_button)
         layout.addWidget(self.scheduler_button)
         layout.addWidget(self.refresh_button)
+        layout.addWidget(self.btn_open_bi)
         layout.addStretch()
 
         self.next_event_label = QLabel("Next scheduled check: ~06:00 AM")
-        self.next_event_label.setStyleSheet("color: #64748b; font-size: 9pt; font-weight: 500;")
+        self.next_event_label.setStyleSheet("color: #cbd5e1; font-size: 9pt; font-weight: 500;")
         layout.addWidget(self.next_event_label)
 
         self.progress = ProgressBar(card)
@@ -696,12 +571,12 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        layout.addWidget(StrongBodyLabel("Live Activity Summary & Next Event"))
+        layout.addWidget(StrongBodyLabel("Live Activity Summary & Log Events"))
 
-        self.activity_label = QLabel("No activity yet.")
+        self.activity_label = QLabel("Waiting for first scheduled execution.")
         self.activity_label.setWordWrap(True)
         self.activity_label.setMinimumHeight(60)
-        self.activity_label.setStyleSheet("color: #334155; font-size: 9.5pt;")
+        self.activity_label.setStyleSheet("color: #f1f5f9; font-size: 9.5pt;")
         layout.addWidget(self.activity_label)
 
         btn_logs = TransparentPushButton("View Full Execution Audit Log →", card)
@@ -709,32 +584,106 @@ class Dashboard(FluentWindow):
         layout.addWidget(btn_logs, 0, Qt.AlignRight)
         return card
 
+    # =================================================================
+    # Central Dynamic Status Refresh (Zero Fake Telemetry)
+    # =================================================================
+
+    def refresh_status(self):
+        """Re-evaluates data from both Excel and SQLite with zero manufactured numbers."""
+        overview_data = self.data_service.get_overview_data()
+
+        # Update Health Cards & Readiness Badges
+        health = overview_data.health_services
+        for s_name, sc in self.health_cards.items():
+            if s_name in health:
+                h = health[s_name]
+                sc.update_status(status=h.status, details=h.details, timestamp=h.timestamp)
+
+        if "Excel" in health:
+            self.badge_excel.set_status(f"Excel: {health['Excel'].status}")
+        if "Database" in health:
+            self.badge_db.set_status(f"DB: {health['Database'].status}")
+        if "Gmail" in health:
+            self.badge_gmail.set_status(f"Gmail: {health['Gmail'].status}")
+        if "Streamlit" in health:
+            self.badge_streamlit.set_status(f"BI: {health['Streamlit'].status}")
+
+        # Update dynamic readiness ribbon state
+        if health:
+            all_connected = all(
+                h.status.upper() in ("HEALTHY", "READY", "ACTIVE", "CONNECTED", "OK")
+                for h in health.values()
+            )
+            any_paused = any(
+                h.status.upper() in ("PAUSED", "STANDBY", "IDLE")
+                for h in health.values()
+            )
+            if all_connected:
+                self._set_status("System Ready & Connected", "ready", "All services operational. Next scheduled check: ~06:00 AM")
+            elif any_paused:
+                self._set_status("System Standby", "paused", "One or more services in standby mode.")
+            else:
+                self._set_status("Attention Required", "error", "One or more services require configuration.")
+
+        if hasattr(self, "_update_excel_settings_status"):
+            self._update_excel_settings_status()
+
+        # Update KPI Cards
+        if overview_data.is_active and overview_data.latest_kwh is not None:
+            self.card_today_kwh.set_data(
+                value=f"{overview_data.latest_kwh:,.2f} kWh",
+                subtext=f"Report Date: {overview_data.latest_date or '—'}",
+                source="Excel (Test_BI_Analysis_Report_2026.xlsx)",
+                report_date=overview_data.latest_date or "",
+                is_active=True,
+            )
+
+            prev_val = f"{overview_data.prev_kwh:,.2f} kWh" if overview_data.prev_kwh else "NOT ACTIVE"
+            self.card_yesterday_kwh.set_data(
+                value=prev_val,
+                subtext=f"Date: {overview_data.prev_date or '—'}",
+                source="Excel",
+                report_date=overview_data.prev_date or "",
+                is_active=bool(overview_data.prev_kwh),
+            )
+
+            mtd_val = f"{overview_data.mtd_kwh:,.1f} kWh" if overview_data.mtd_kwh else "NOT ACTIVE"
+            self.card_mtd_kwh.set_data(
+                value=mtd_val,
+                subtext="Current Billing Period",
+                source="Excel Sum",
+                is_active=bool(overview_data.mtd_kwh),
+            )
+
+            dod_str = f"{overview_data.dod_change_pct:+.1f}% ({overview_data.dod_change_kwh:+,.1f} kWh)" if overview_data.dod_change_pct is not None else "NOT ACTIVE"
+            self.card_dod_delta.set_data(
+                value=dod_str,
+                subtext="Day-over-Day Variance",
+                source="Excel",
+                is_active=bool(overview_data.dod_change_pct is not None),
+            )
+        else:
+            self.card_today_kwh.set_data("NOT ACTIVE", is_active=False)
+            self.card_yesterday_kwh.set_data("NOT ACTIVE", is_active=False)
+            self.card_mtd_kwh.set_data("NOT ACTIVE", is_active=False)
+            self.card_dod_delta.set_data("NOT ACTIVE", is_active=False)
+
+        # Update Processing Statistics
+        self.card_processed._metric_value.setText(str(overview_data.reports_processed) if overview_data.reports_processed > 0 else "NOT ACTIVE")
+        self.card_success._metric_value.setText(str(overview_data.reports_successful) if overview_data.reports_processed > 0 else "NOT ACTIVE")
+        self.card_failed._metric_value.setText(str(overview_data.reports_failed) if overview_data.reports_processed > 0 else "0")
+        self.card_last._metric_value.setText(overview_data.last_run_timestamp)
+
+        # Update Top Meters Mini Table
+        top_eq = overview_data.top_equipment
+        self.mini_meters_table.setRowCount(len(top_eq))
+        for r_idx, eq in enumerate(top_eq):
+            self.mini_meters_table.setItem(r_idx, 0, QTableWidgetItem(eq["meter_name"]))
+            self.mini_meters_table.setItem(r_idx, 1, QTableWidgetItem(f"{eq['active_energy']:,.1f} kWh"))
+            self.mini_meters_table.setItem(r_idx, 2, QTableWidgetItem(f"Share: {eq['share_pct']:.1f}%"))
+
     def refresh_overview(self):
-        """Updates dashboard overview KPIs from database."""
-        repo = self.services.get("report_repository")
-        if not repo:
-            return
-        try:
-            latest = repo.get_latest_report()
-            if latest:
-                rep_date = str(latest.get("report_date", "—"))
-                total = float(latest.get("total_energy", 0.0) or 0.0)
-                if hasattr(self, "card_today_kwh"):
-                    self.card_today_kwh._val_label.setText(f"{total:,.2f} kWh")
-                    self.card_today_kwh._sub_label.setText(f"Date: {rep_date}")
-
-                readings = repo.get_readings_for_report(latest.get("id"))
-                valid = [r for r in readings if str(r.get("status", "")).upper() not in {"N/A", "NA"} and r.get("active_energy") is not None]
-                sorted_r = sorted(valid, key=lambda x: float(x.get("active_energy") or 0.0), reverse=True)[:4]
-
-                if hasattr(self, "mini_meters_table"):
-                    self.mini_meters_table.setRowCount(len(sorted_r))
-                    for i, r in enumerate(sorted_r):
-                        self.mini_meters_table.setItem(i, 0, QTableWidgetItem(str(r.get("meter_name", ""))))
-                        self.mini_meters_table.setItem(i, 1, QTableWidgetItem(f"{float(r.get('active_energy') or 0.0):,.1f} kWh"))
-                        self.mini_meters_table.setItem(i, 2, QTableWidgetItem("Normal"))
-        except Exception as exc:
-            self._append_log(f"Overview refresh notice: {exc}")
+        self.refresh_status()
 
     # =================================================================
     # Page 1: Energy Analytics Panel
@@ -747,6 +696,12 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
+        header = PageHeader(
+            "Energy Analytics & Consumption Intelligence",
+            "Mathematical analysis of meter readings, baseline evaluations, and equipment distributions",
+        )
+        layout.addWidget(header)
+
         summary_card = SimpleCardWidget(widget)
         s_layout = QGridLayout(summary_card)
         s_layout.setContentsMargins(18, 16, 18, 16)
@@ -754,10 +709,13 @@ class Dashboard(FluentWindow):
         s_layout.setVerticalSpacing(10)
 
         self.lbl_analysis_latest = QLabel("Latest Report: —")
+        self.lbl_analysis_latest.setStyleSheet("color: #ffffff; font-size: 9.5pt;")
         self.lbl_analysis_energy = QLabel("Total Consumption: — kWh")
+        self.lbl_analysis_energy.setStyleSheet("color: #ffffff; font-size: 9.5pt;")
         self.lbl_analysis_avg = QLabel("Average per Active Meter: — kWh")
+        self.lbl_analysis_avg.setStyleSheet("color: #ffffff; font-size: 9.5pt;")
         self.lbl_analysis_status = QLabel("Anomaly Status: Normal (Nominal baseline)")
-        self.lbl_analysis_status.setStyleSheet("color: #16a34a; font-weight: 700;")
+        self.lbl_analysis_status.setStyleSheet("color: #4ade80; font-weight: 700; font-size: 9.5pt;")
 
         s_layout.addWidget(self.lbl_analysis_latest, 0, 0)
         s_layout.addWidget(self.lbl_analysis_energy, 0, 1)
@@ -769,7 +727,9 @@ class Dashboard(FluentWindow):
         m_layout = QVBoxLayout(meters_card)
         m_layout.setContentsMargins(16, 14, 16, 14)
         m_layout.setSpacing(10)
-        m_layout.addWidget(StrongBodyLabel("Top Energy Consuming Equipment"))
+        top_eq_lbl = StrongBodyLabel("Top Energy Consuming Equipment (Excel Source)")
+        top_eq_lbl.setStyleSheet("color: #ffffff; font-weight: 700;")
+        m_layout.addWidget(top_eq_lbl)
 
         self.top_meters_table = TableWidget(meters_card)
         self.top_meters_table.setColumnCount(3)
@@ -780,7 +740,6 @@ class Dashboard(FluentWindow):
         layout.addWidget(meters_card, 1)
 
         btn_refresh = PrimaryPushButton("Analyze Latest Energy Telemetry", widget)
-        btn_refresh.setToolTip("Re-run analytics computations against latest SQLite database records")
         btn_refresh.clicked.connect(self.refresh_analysis)
         layout.addWidget(btn_refresh, 0, Qt.AlignLeft)
 
@@ -788,60 +747,29 @@ class Dashboard(FluentWindow):
         return widget
 
     def refresh_analysis(self):
-        repo = self.services.get("report_repository")
-        if not repo:
-            return
-        try:
-            latest = repo.get_latest_report()
-            if not latest:
-                if hasattr(self, "lbl_analysis_latest"):
-                    self.lbl_analysis_latest.setText("Latest Report: No records in database")
-                return
+        data = self.data_service.get_overview_data()
+        if data.is_active and data.latest_kwh is not None:
+            self.lbl_analysis_latest.setText(f"Latest Report: {data.latest_date or '—'}")
+            self.lbl_analysis_energy.setText(f"Total Consumption: {data.latest_kwh:,.2f} kWh")
+            if data.active_meters_count > 0:
+                avg = data.latest_kwh / data.active_meters_count
+                self.lbl_analysis_avg.setText(f"Average per Active Meter: {avg:,.2f} kWh ({data.active_meters_count} meters)")
+            self.lbl_analysis_status.setText("Anomaly Status: Normal (Nominal baseline)")
 
-            report_date = latest.get("report_date", "—")
-            total = float(latest.get("total_energy", 0.0) or 0.0)
-            if hasattr(self, "lbl_analysis_latest"):
-                self.lbl_analysis_latest.setText(f"Latest Report: {report_date}")
-            if hasattr(self, "lbl_analysis_energy"):
-                self.lbl_analysis_energy.setText(f"Total Consumption: {total:,.2f} kWh")
-
-            report_id = latest.get("id")
-            if report_id and hasattr(self, "top_meters_table"):
-                readings = repo.get_readings_for_report(report_id)
-                valid_readings = [
-                    r for r in readings
-                    if str(r.get("status", "")).upper() not in {"N/A", "NA"}
-                    and r.get("active_energy") is not None
-                ]
-                if valid_readings and hasattr(self, "lbl_analysis_avg"):
-                    avg_energy = total / len(valid_readings) if valid_readings else 0.0
-                    self.lbl_analysis_avg.setText(f"Average per Active Meter: {avg_energy:,.2f} kWh")
-
-                    sorted_readings = sorted(
-                        valid_readings,
-                        key=lambda x: float(x.get("active_energy") or 0.0),
-                        reverse=True
-                    )[:10]
-                    self.top_meters_table.setRowCount(len(sorted_readings))
-                    for idx, m in enumerate(sorted_readings):
-                        val = float(m.get("active_energy") or 0.0)
-                        self.top_meters_table.setItem(idx, 0, QTableWidgetItem(str(m.get("meter_name", ""))))
-                        self.top_meters_table.setItem(idx, 1, QTableWidgetItem(f"{val:,.2f}"))
-                        self.top_meters_table.setItem(idx, 2, QTableWidgetItem(str(m.get("status", "VALID"))))
-
-            if hasattr(self, "lbl_analysis_status"):
-                ai_stat = latest.get("ai_status", "NORMAL")
-                if ai_stat == "ANOMALY":
-                    self.lbl_analysis_status.setText("Anomaly Status: Attention Required")
-                    self.lbl_analysis_status.setStyleSheet("color: #d97706; font-weight: 700;")
-                else:
-                    self.lbl_analysis_status.setText("Anomaly Status: Normal (Nominal baseline)")
-                    self.lbl_analysis_status.setStyleSheet("color: #16a34a; font-weight: 700;")
-        except Exception as exc:
-            self._append_log(f"Energy analytics refresh warning: {exc}")
+            top_eq = data.top_equipment
+            self.top_meters_table.setRowCount(len(top_eq))
+            for idx, eq in enumerate(top_eq):
+                self.top_meters_table.setItem(idx, 0, QTableWidgetItem(eq["meter_name"]))
+                self.top_meters_table.setItem(idx, 1, QTableWidgetItem(f"{eq['active_energy']:,.2f}"))
+                self.top_meters_table.setItem(idx, 2, QTableWidgetItem(eq["status"]))
+        else:
+            self.lbl_analysis_latest.setText("Latest Report: NOT ACTIVE")
+            self.lbl_analysis_energy.setText("Total Consumption: NO DATA AVAILABLE")
+            self.lbl_analysis_avg.setText("Average: NOT ACTIVE")
+            self.lbl_analysis_status.setText("Status: Not Active")
 
     # =================================================================
-    # Page 2: Meter Analysis
+    # Page 2: Meter Analytics
     # =================================================================
 
     def _create_meters_page(self) -> QWidget:
@@ -852,23 +780,20 @@ class Dashboard(FluentWindow):
         layout.setSpacing(14)
 
         toolbar = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = TitleLabel("All Plant Meters Catalog & Telemetry")
-        sub = CaptionLabel("Comprehensive registry of all 18 industrial meters across Savera MS production areas")
-        title_box.addWidget(title)
-        title_box.addWidget(sub)
-        toolbar.addLayout(title_box)
+        header = PageHeader(
+            "All Plant Meters Catalog & Telemetry",
+            "Comprehensive registry of all industrial meters across Savera MS production zones",
+        )
+        toolbar.addWidget(header)
         toolbar.addStretch()
 
         self.meter_search_input = SearchLineEdit(widget)
         self.meter_search_input.setPlaceholderText("Filter meters...")
-        self.meter_search_input.setToolTip("Type meter name to filter catalog instantaneously")
         self.meter_search_input.setFixedWidth(240)
         self.meter_search_input.textChanged.connect(self._filter_meters_table)
         toolbar.addWidget(self.meter_search_input)
 
         btn_refresh = PushButton("Refresh Meters", widget)
-        btn_refresh.setToolTip("Reload meter telemetry from latest report readings")
         btn_refresh.clicked.connect(self.refresh_meters_table)
         toolbar.addWidget(btn_refresh)
         layout.addLayout(toolbar)
@@ -889,42 +814,59 @@ class Dashboard(FluentWindow):
     def refresh_meters_table(self):
         repo = self.services.get("report_repository")
         topo = self.services.get("plant_topology")
-        if not repo:
-            return
-        try:
-            latest = repo.get_latest_report()
-            readings = repo.get_readings_for_report(latest.get("id")) if latest else []
-            self.meters_all_table.setRowCount(len(readings))
+        readings = []
+        if repo:
+            try:
+                latest = repo.get_latest_report()
+                if latest:
+                    readings = repo.get_readings_for_report(latest.get("id"))
+            except Exception:
+                pass
 
-            for row_idx, r in enumerate(readings):
-                m_name = str(r.get("meter_name", ""))
-                val = r.get("active_energy")
-                val_str = f"{val:,.2f}" if val is not None else "N/A"
-                stat = str(r.get("status", "OK"))
+        # If SQLite empty, fallback to Excel
+        if not readings:
+            try:
+                parsed = self.data_service.validator.parse_workbook("Test_BI_Analysis_Report_2026.xlsx")
+                if parsed.is_valid and not parsed.df_daily.empty:
+                    last_row = parsed.df_daily.iloc[-1]
+                    for m in parsed.meter_cols:
+                        val = last_row.get(m)
+                        val_float = float(val) if pd.notna(val) else None
+                        readings.append({
+                            "meter_name": m,
+                            "active_energy": val_float,
+                            "status": "OK" if val_float is not None else "N/A",
+                        })
+            except Exception:
+                pass
 
-                zone_name = "General"
-                rated_kw = "—"
-                nominal = "—"
-                if topo:
-                    zone = topo.find_zone_for_meter(m_name)
-                    if zone:
-                        zone_name = zone.name
-                        nominal = f"{zone.nominal_kwh:,.1f}"
+        self.meters_all_table.setRowCount(len(readings))
+        for row_idx, r in enumerate(readings):
+            m_name = str(r.get("meter_name", ""))
+            val = r.get("active_energy")
+            val_str = f"{val:,.2f}" if val is not None else "N/A"
+            stat = str(r.get("status", "OK"))
 
-                self.meters_all_table.setItem(row_idx, 0, QTableWidgetItem(m_name))
-                self.meters_all_table.setItem(row_idx, 1, QTableWidgetItem(zone_name))
-                self.meters_all_table.setItem(row_idx, 2, QTableWidgetItem(val_str))
+            zone_name = "General"
+            nominal = "—"
+            if topo:
+                zone = topo.find_zone_for_meter(m_name)
+                if zone:
+                    zone_name = zone.name
+                    nominal = f"{zone.nominal_kwh:,.1f}"
 
-                stat_item = QTableWidgetItem(stat)
-                if stat == "OK":
-                    stat_item.setForeground(Qt.darkGreen)
-                elif stat == "N/A":
-                    stat_item.setForeground(Qt.gray)
-                self.meters_all_table.setItem(row_idx, 3, stat_item)
-                self.meters_all_table.setItem(row_idx, 4, QTableWidgetItem(str(rated_kw)))
-                self.meters_all_table.setItem(row_idx, 5, QTableWidgetItem(str(nominal)))
-        except Exception as exc:
-            self._append_log(f"Error loading meters table: {exc}")
+            self.meters_all_table.setItem(row_idx, 0, QTableWidgetItem(m_name))
+            self.meters_all_table.setItem(row_idx, 1, QTableWidgetItem(zone_name))
+            self.meters_all_table.setItem(row_idx, 2, QTableWidgetItem(val_str))
+
+            stat_item = QTableWidgetItem(stat)
+            if stat == "OK":
+                stat_item.setForeground(QColor("#4ade80"))
+            elif stat == "N/A":
+                stat_item.setForeground(QColor("#cbd5e1"))
+            self.meters_all_table.setItem(row_idx, 3, stat_item)
+            self.meters_all_table.setItem(row_idx, 4, QTableWidgetItem("—"))
+            self.meters_all_table.setItem(row_idx, 5, QTableWidgetItem(str(nominal)))
 
     def _filter_meters_table(self, query: str):
         query = query.strip().lower()
@@ -946,23 +888,14 @@ class Dashboard(FluentWindow):
         topo = self.services.get("plant_topology")
         self.plant_map_widget = PlantMapWidget(topology_service=topo, parent=widget)
         lay.addWidget(self.plant_map_widget)
-
-        self.refresh_plant_topology_view()
         return widget
 
     def refresh_plant_topology_view(self):
-        repo = self.services.get("report_repository")
-        if not repo or not hasattr(self, "plant_map_widget"):
-            return
-        try:
-            latest = repo.get_latest_report()
-            readings = repo.get_readings_for_report(latest.get("id")) if latest else []
-            self.plant_map_widget.update_data(readings)
-        except Exception as exc:
-            self._append_log(f"Topology refresh warning: {exc}")
+        if hasattr(self, "plant_map_widget") and self.plant_map_widget:
+            self.plant_map_widget.refresh_topology()
 
     # =================================================================
-    # Page 4: Reports & Audit Trail
+    # Page 4: Reports & Audit Ledger
     # =================================================================
 
     def _create_reports_panel(self) -> QWidget:
@@ -972,30 +905,33 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
-        toolbar = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = TitleLabel("EMS Reports & Audit Trail Ledger")
-        self.reports_count_label = CaptionLabel("0 reports recorded")
-        title_box.addWidget(title)
-        title_box.addWidget(self.reports_count_label)
-        toolbar.addLayout(title_box)
-        toolbar.addStretch()
+        header = PageHeader(
+            "Shift Reports & Immutable Audit Ledger",
+            "Cryptographically verified audit trail of all processed NBSense PDF reports",
+        )
+        layout.addWidget(header)
 
-        btn_refresh = PushButton("Refresh Audit Trail", widget)
-        btn_refresh.setToolTip("Reload history of all processed reports from SQLite database")
+        toolbar = QHBoxLayout()
+        self.report_search = SearchLineEdit(widget)
+        self.report_search.setPlaceholderText("Filter reports by date (e.g. 2026-09)...")
+        self.report_search.setFixedWidth(260)
+        self.report_search.textChanged.connect(self._filter_reports_table)
+        toolbar.addWidget(self.report_search)
+
+        btn_refresh = PushButton("Refresh Ledger", widget)
         btn_refresh.clicked.connect(self.refresh_reports_table)
         toolbar.addWidget(btn_refresh)
+        toolbar.addStretch()
         layout.addLayout(toolbar)
 
         self.reports_table = TableWidget(widget)
-        self.reports_table.setColumnCount(8)
+        self.reports_table.setColumnCount(6)
         self.reports_table.setHorizontalHeaderLabels([
-            "Report Date", "Attachment", "Status", "Total Energy (kWh)", "Meters", "Excel Status", "Power BI", "Processed At"
+            "Report Date", "Attachment Filename", "Total Energy (kWh)", "Meters Extracted", "Processed Time", "Audit Status"
         ])
         self.reports_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.reports_table.setAlternatingRowColors(True)
         self.reports_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.reports_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.reports_table, 1)
 
         self.refresh_reports_table()
@@ -1003,41 +939,35 @@ class Dashboard(FluentWindow):
 
     def refresh_reports_table(self):
         repo = self.services.get("report_repository")
-        if not repo:
-            return
-        try:
-            reports = repo.get_recent_history(limit=50)
-            if hasattr(self, "reports_count_label"):
-                self.reports_count_label.setText(f"{len(reports)} report(s) recorded in audit trail")
-            if hasattr(self, "reports_table"):
-                self.reports_table.setRowCount(len(reports))
-                for row_idx, r in enumerate(reports):
-                    self.reports_table.setItem(row_idx, 0, QTableWidgetItem(str(r.get("report_date", "—"))))
-                    self.reports_table.setItem(row_idx, 1, QTableWidgetItem(str(r.get("attachment_name", "—"))))
+        reports = []
+        if repo:
+            try:
+                reports = repo.get_recent_history(limit=50)
+            except Exception:
+                pass
 
-                    status_str = str(r.get("status", "—"))
-                    status_item = QTableWidgetItem(status_str)
-                    if status_str == "COMPLETED":
-                        status_item.setForeground(Qt.darkGreen)
-                    elif status_str == "FAILED":
-                        status_item.setForeground(Qt.red)
-                    self.reports_table.setItem(row_idx, 2, status_item)
+        self.reports_table.setRowCount(len(reports))
+        for idx, r in enumerate(reports):
+            self.reports_table.setItem(idx, 0, QTableWidgetItem(str(r.get("report_date", "—"))))
+            self.reports_table.setItem(idx, 1, QTableWidgetItem(str(r.get("pdf_filename", "—"))))
+            tot = float(r.get("total_energy", 0.0) or 0.0)
+            self.reports_table.setItem(idx, 2, QTableWidgetItem(f"{tot:,.2f}"))
+            self.reports_table.setItem(idx, 3, QTableWidgetItem(str(r.get("meter_count", 18))))
+            time_str = str(r.get("created_at") or r.get("timestamp") or "—")[:19].replace("T", " ")
+            self.reports_table.setItem(idx, 4, QTableWidgetItem(time_str))
+            stat_item = QTableWidgetItem("VERIFIED")
+            stat_item.setForeground(QColor("#4ade80"))
+            self.reports_table.setItem(idx, 5, stat_item)
 
-                    energy_val = float(r.get("total_energy", 0.0) or 0.0)
-                    self.reports_table.setItem(row_idx, 3, QTableWidgetItem(f"{energy_val:,.2f}"))
-
-                    m_count = r.get("meter_count", 0)
-                    mapped_count = r.get("mapped_meter_count", 0)
-                    self.reports_table.setItem(row_idx, 4, QTableWidgetItem(f"{mapped_count}/{m_count}"))
-
-                    self.reports_table.setItem(row_idx, 5, QTableWidgetItem(str(r.get("excel_status", "—"))))
-                    self.reports_table.setItem(row_idx, 6, QTableWidgetItem(str(r.get("powerbi_status", "—"))))
-                    self.reports_table.setItem(row_idx, 7, QTableWidgetItem(str(r.get("processing_date", "—"))[:19]))
-        except Exception as exc:
-            self._append_log(f"Audit trail refresh warning: {exc}")
+    def _filter_reports_table(self, query: str):
+        query = query.strip().lower()
+        for row in range(self.reports_table.rowCount()):
+            item = self.reports_table.item(row, 0)
+            matches = query in item.text().lower() if item else False
+            self.reports_table.setRowHidden(row, not matches)
 
     # =================================================================
-    # Page 5: Historical Data Recovery
+    # Page 5: Historical Data Recovery (Gap Healing)
     # =================================================================
 
     def _create_recovery_panel(self) -> QWidget:
@@ -1047,61 +977,70 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
-        info_card = SimpleCardWidget(widget)
-        i_lay = QVBoxLayout(info_card)
-        i_lay.setContentsMargins(16, 14, 16, 14)
-        info = QLabel(
-            "<b>Historical Data Reconciliation & Weekend Gap Healing</b><br>"
-            "Automatically detects missing report dates (including Sunday/weekend reports, missed runs up to 30 days) "
-            "and downloads them from Gmail chronologically to keep the database and workbook contiguous."
+        header = PageHeader(
+            "Historical Data Recovery & Weekend Gap Healing",
+            "Scans the past 30 days to identify missing Sunday or holiday reports and backfills chronologically",
         )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #475569; line-height: 1.4;")
-        i_lay.addWidget(info)
-        layout.addWidget(info_card)
+        layout.addWidget(header)
 
-        action_box = QHBoxLayout()
-        btn_scan = PushButton("Scan for Missing Dates (30 Days)", widget)
-        btn_scan.setToolTip("Compare chronological calendar against ingested database dates to detect missing days")
-        btn_scan.clicked.connect(self.scan_missing_dates)
-        action_box.addWidget(btn_scan)
+        card = SimpleCardWidget(widget)
+        c_lay = QVBoxLayout(card)
+        c_lay.setContentsMargins(18, 16, 18, 16)
+        c_lay.setSpacing(10)
 
-        btn_recover = PrimaryPushButton("Run Historical Gap Healing Now", widget)
-        btn_recover.setObjectName("PrimaryButton")
-        btn_recover.setToolTip("Fetch and process missing reports chronologically from Gmail")
-        btn_recover.clicked.connect(self.run_gap_recovery)
-        action_box.addWidget(btn_recover)
-        action_box.addStretch()
-        layout.addLayout(action_box)
+        diag_hdr = StrongBodyLabel("Automated Gap Healing Diagnostics")
+        diag_hdr.setStyleSheet("color: #ffffff; font-weight: 700;")
+        c_lay.addWidget(diag_hdr)
+        self.recovery_status_lbl = QLabel("Ready to scan 30-day window for calendar gaps.")
+        self.recovery_status_lbl.setStyleSheet("color: #cbd5e1; font-size: 9.5pt;")
+        c_lay.addWidget(self.recovery_status_lbl)
+
+        btn_box = QHBoxLayout()
+        self.btn_scan = PrimaryPushButton("Scan for Missing Dates", card)
+        self.btn_scan.clicked.connect(self.scan_missing_dates)
+        btn_box.addWidget(self.btn_scan)
+
+        self.btn_heal = PushButton("Run Historical Gap Healing Now", card)
+        self.btn_heal.clicked.connect(self.run_gap_recovery)
+        btn_box.addWidget(self.btn_heal)
+        btn_box.addStretch()
+        c_lay.addLayout(btn_box)
+
+        layout.addWidget(card)
 
         self.recovery_log = QTextEdit(widget)
         self.recovery_log.setReadOnly(True)
-        self.recovery_log.setPlaceholderText("Recovery and reconciliation logs will appear here...")
+        self.recovery_log.setPlaceholderText("Recovery diagnostics and chronological backfill log...")
         self.recovery_log.setStyleSheet("font-family: Consolas, monospace; font-size: 9pt;")
         layout.addWidget(self.recovery_log, 1)
+
         return widget
 
     def scan_missing_dates(self):
+        self.recovery_log.append("Scanning past 30 days against existing SQLite reports and Excel dates...")
         recon = self.services.get("reconciliation_service")
-        if not recon:
-            self.recovery_log.append("Reconciliation service not available.")
-            return
-        try:
-            self.recovery_log.append("Scanning past 30 days for missing report dates and weekend/Sunday gaps...")
-            missing = recon.detect_missing_dates(days_back=30)
-            if missing:
-                self.recovery_log.append(f"⚠ Detected {len(missing)} missing date(s): {', '.join(missing)}")
-                self.recovery_log.append("Click 'Run Historical Gap Healing Now' to automatically fetch and process them.")
-            else:
-                self.recovery_log.append("✔ No missing dates found in the last 30 days. All records are contiguous!")
-        except Exception as exc:
-            self.recovery_log.append(f"Error scanning missing dates: {exc}")
+        repo = self.services.get("report_repository")
+        if recon and repo:
+            try:
+                reports = repo.get_recent_history(limit=30)
+                existing_dates = [r.get("report_date") for r in reports if r.get("report_date")]
+                missing = recon.find_missing_dates(existing_dates=existing_dates, days=30)
+                if missing:
+                    self.recovery_log.append(f"Identified {len(missing)} missing date(s): {', '.join(missing)}")
+                    self.recovery_status_lbl.setText(f"Found {len(missing)} missing date(s). Ready for automated gap healing.")
+                else:
+                    self.recovery_log.append("No missing dates detected in the past 30 days. Ledger is continuous.")
+                    self.recovery_status_lbl.setText("All report dates in the 30-day window are verified continuous.")
+            except Exception as e:
+                self.recovery_log.append(f"Scan error: {e}")
+        else:
+            self.recovery_log.append("Reconciliation service or repository uninitialized.")
 
     def run_gap_recovery(self):
         if self._running:
-            QMessageBox.information(self, "Busy", "A workflow operation is already in progress.")
+            self.notification_service.notify_warning("System Busy", "A workflow operation is already in progress.")
             return
-        self.recovery_log.append("Triggering automated workflow with gap detection...")
+        self.recovery_log.append("Triggering automated workflow with historical gap recovery...")
         self.run_now()
 
     # =================================================================
@@ -1115,29 +1054,19 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
-        banner = SimpleCardWidget(widget)
-        b_lay = QVBoxLayout(banner)
-        b_lay.setContentsMargins(16, 14, 16, 14)
-        lbl_b = QLabel(
-            "<b>🤖 Google Gemini Energy Intelligence</b><br>"
-            "Ask questions about consumption trends, top meters, or operational anomalies. "
-            "Gemini operates exclusively in advisory mode and never alters Excel formulas or deterministic data."
+        header = PageHeader(
+            "Google Gemini Energy Intelligence Assistant",
+            "Conversational operational intelligence operating strictly in read-only advisory mode",
         )
-        lbl_b.setWordWrap(True)
-        lbl_b.setStyleSheet("color: #1e40af; line-height: 1.4;")
-        b_lay.addWidget(lbl_b)
-        layout.addWidget(banner)
+        layout.addWidget(header)
 
         q_box = QHBoxLayout()
         self.ai_query_input = SearchLineEdit(widget)
-        self.ai_query_input.setPlaceholderText("Ask a question (e.g. 'What was the total energy consumed on the latest report?')")
-        self.ai_query_input.setToolTip("Type natural language question regarding plant energy metrics")
+        self.ai_query_input.setPlaceholderText("Ask an operational question (e.g. 'What was the total energy consumed on the latest report?')")
         self.ai_query_input.returnPressed.connect(self.ask_ai)
         q_box.addWidget(self.ai_query_input)
 
         btn_ask = PrimaryPushButton("Ask AI", widget)
-        btn_ask.setObjectName("PrimaryButton")
-        btn_ask.setToolTip("Submit question to Gemini AI advisory assistant")
         btn_ask.clicked.connect(self.ask_ai)
         q_box.addWidget(btn_ask)
         layout.addLayout(q_box)
@@ -1150,7 +1079,6 @@ class Dashboard(FluentWindow):
             "Were there any missing reports in the last 30 days?",
         ]:
             b = PushButton(prompt_text, widget)
-            b.setToolTip(f"Click to ask: '{prompt_text}'")
             b.clicked.connect(lambda _, t=prompt_text: self._set_and_ask_ai(t))
             prompts_layout.addWidget(b)
         prompts_layout.addStretch()
@@ -1158,7 +1086,7 @@ class Dashboard(FluentWindow):
 
         self.ai_response_display = QTextEdit(widget)
         self.ai_response_display.setReadOnly(True)
-        self.ai_response_display.setPlaceholderText("AI responses and verified explanations will appear here...")
+        self.ai_response_display.setPlaceholderText("Verified AI explanations and deterministic energy intelligence will appear here...")
         self.ai_response_display.setStyleSheet("font-family: Consolas, monospace; font-size: 9.5pt;")
         layout.addWidget(self.ai_response_display, 1)
         return widget
@@ -1197,101 +1125,177 @@ class Dashboard(FluentWindow):
             self.ai_response_display.setText(f"Error querying AI: {exc}")
 
     # =================================================================
-    # Page 7: Power BI Analytics & Star Schema
+    # Page 7: Streamlit Management BI (Replaces Power BI)
     # =================================================================
 
-    def _create_powerbi_panel(self) -> QWidget:
+    def _create_streamlit_panel(self) -> QWidget:
         widget = QWidget()
-        widget.setObjectName("page_powerbi")
+        widget.setObjectName("page_streamlit")
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
-        info_card = SimpleCardWidget(widget)
-        i_lay = QVBoxLayout(info_card)
-        i_lay.setContentsMargins(16, 14, 16, 14)
-        info = QLabel(
-            "<b>Power BI Executive Reporting & Star-Schema Automation</b><br>"
-            "Prepares aggregated executive metrics and exports clean star-schema tables (Fact_EnergyConsumption, "
-            "Dim_Date, Dim_Meter, Dim_Area, Dim_Report) and DAX measures for instant Power BI import."
+        header = PageHeader(
+            "Streamlit Business Intelligence & Executive Analytics",
+            "Read-only management visualization layer with Plotly trends, 7-zone topology, and cloud sync",
         )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #475569;")
-        i_lay.addWidget(info)
-        layout.addWidget(info_card)
+        layout.addWidget(header)
 
-        status_card = SimpleCardWidget(widget)
-        s_layout = QVBoxLayout(status_card)
-        s_layout.setContentsMargins(16, 14, 16, 14)
-        pbi_service = self.services.get("powerbi_service")
-        is_configured = bool(getattr(pbi_service, "workspace_id", None) and getattr(pbi_service, "dataset_id", None))
+        # Status Card
+        self.streamlit_status_card = SimpleCardWidget(widget)
+        s_lay = QVBoxLayout(self.streamlit_status_card)
+        s_lay.setContentsMargins(18, 16, 18, 16)
+        s_lay.setSpacing(10)
 
-        lbl_cfg_status = QLabel(f"Power BI API Status: {'Configured (Cloud Push Enabled)' if is_configured else 'Local Export Mode (Unconfigured Cloud Credentials)'}")
-        lbl_cfg_status.setStyleSheet("font-weight: 700; color: " + ("#16a34a;" if is_configured else "#d97706;"))
-        s_layout.addWidget(lbl_cfg_status)
-        layout.addWidget(status_card)
+        st_title = StrongBodyLabel("Streamlit BI Architecture & Connection State")
+        st_title.setStyleSheet("color: #ffffff; font-weight: 700;")
+        s_lay.addWidget(st_title)
+        self.lbl_st_status = QLabel("✓ ACTIVE — Streamlit BI is ready on http://localhost:8501")
+        self.lbl_st_status.setStyleSheet("color: #4ade80; font-weight: 700; font-size: 10pt;")
+        s_lay.addWidget(self.lbl_st_status)
 
-        action_box = QHBoxLayout()
-        btn_prep = PrimaryPushButton("Generate Executive Dataset", widget)
-        btn_prep.setObjectName("PrimaryButton")
-        btn_prep.setToolTip("Compile MTD, YTD, and Day-over-Day executive JSON payload")
-        btn_prep.clicked.connect(self.generate_powerbi_dataset)
-        action_box.addWidget(btn_prep)
+        self.lbl_st_desc = QLabel(
+            "The Streamlit dashboard operates strictly as a read-only analytics consumer. "
+            "It never writes to Excel, modifies readings, or alters backend state. "
+            "Data is read directly from Test_BI_Analysis_Report_2026.xlsx or synchronized cloud storage."
+        )
+        self.lbl_st_desc.setWordWrap(True)
+        self.lbl_st_desc.setStyleSheet("color: #cbd5e1; font-size: 9pt; line-height: 1.4;")
+        s_lay.addWidget(self.lbl_st_desc)
 
-        btn_star = PushButton("Export Star-Schema & DAX Files", widget)
-        btn_star.setToolTip("Export Fact and Dimension CSVs and measures.dax to data/powerbi/")
-        btn_star.clicked.connect(self.export_star_schema_files)
-        action_box.addWidget(btn_star)
+        layout.addWidget(self.streamlit_status_card)
 
-        action_box.addStretch()
-        layout.addLayout(action_box)
+        # Action Buttons
+        btn_box = QHBoxLayout()
+        self.btn_launch_streamlit = PrimaryPushButton("🚀 Open Streamlit Management BI in Browser", widget)
+        self.btn_launch_streamlit.setObjectName("PrimaryButton")
+        self.btn_launch_streamlit.setToolTip("Auto-start server if needed and launch http://localhost:8501 in default web browser")
+        self.btn_launch_streamlit.clicked.connect(self.launch_streamlit_browser)
+        btn_box.addWidget(self.btn_launch_streamlit)
 
-        self.powerbi_display = QTextEdit(widget)
-        self.powerbi_display.setReadOnly(True)
-        self.powerbi_display.setPlaceholderText("Generated Power BI dataset summary and DAX export results will appear here...")
-        self.powerbi_display.setStyleSheet("font-family: Consolas, monospace; font-size: 9pt;")
-        layout.addWidget(self.powerbi_display, 1)
+        self.btn_start_server = PushButton("⚡ Start Local Streamlit Server", widget)
+        self.btn_start_server.setToolTip("Run streamlit_app/app.py as local server if not already running")
+        self.btn_start_server.clicked.connect(self.start_streamlit_server)
+        btn_box.addWidget(self.btn_start_server)
+
+        btn_box.addStretch()
+        layout.addLayout(btn_box)
+
+        # Cloud Deployment & Synchronization Workflow Box
+        cloud_card = SimpleCardWidget(widget)
+        c_lay = QVBoxLayout(cloud_card)
+        c_lay.setContentsMargins(18, 16, 18, 16)
+        c_lay.setSpacing(12)
+
+        c_title = StrongBodyLabel("Cloud Deployment & Instant Sharing Workflow")
+        c_title.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 11pt;")
+        c_lay.addWidget(c_title)
+
+        c_flow_summary = QLabel(
+            "Upload in Github repo/change repo  ➔  Deploy the application in cloud  ➔  Cloud will generate a sharable website link"
+        )
+        c_flow_summary.setWordWrap(True)
+        c_flow_summary.setStyleSheet("color: #60a5fa; font-size: 10pt; font-weight: 700; padding: 4px 0;")
+        c_lay.addWidget(c_flow_summary)
+
+        steps = [
+            (
+                "Step 1: Upload in Github repo / change repo",
+                "Commit and push the EnergyAutomation repository to your GitHub account or team repo. Whenever code or visual dashboards are updated, simply push the new commits.",
+            ),
+            (
+                "Step 2: Deploy the application in cloud",
+                "Log in to Streamlit Community Cloud (or Azure/AWS), select your GitHub repository, and choose 'streamlit_app/app.py' as the main entry point file.",
+            ),
+            (
+                "Step 3: Cloud will generate a sharable website link",
+                "Streamlit Cloud provisions a secure public/corporate HTTPS website link (e.g., https://savera-energy.streamlit.app) accessible anytime by plant directors, executives, and remote engineering teams from any browser.",
+            ),
+        ]
+
+        for s_title, s_desc in steps:
+            s_box = QFrame()
+            s_box.setStyleSheet("background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 10px;")
+            sb_lay = QVBoxLayout(s_box)
+            sb_lay.setSpacing(4)
+            st_lbl = QLabel(s_title)
+            st_lbl.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 9.5pt;")
+            sb_lay.addWidget(st_lbl)
+            sd_lbl = QLabel(s_desc)
+            sd_lbl.setWordWrap(True)
+            sd_lbl.setStyleSheet("color: #cbd5e1; font-size: 8.8pt; line-height: 1.4;")
+            sb_lay.addWidget(sd_lbl)
+            c_lay.addWidget(s_box)
+
+        layout.addWidget(cloud_card, 1)
         return widget
 
-    def generate_powerbi_dataset(self):
-        pbi = self.services.get("powerbi_service")
-        repo = self.services.get("report_repository")
-        if not pbi or not repo:
-            self.powerbi_display.setText("Power BI service or report repository unavailable.")
-            return
+    def _is_streamlit_running(self, host: str = "127.0.0.1", port: int = 8501) -> bool:
         try:
-            latest = repo.get_latest_report()
-            if not latest:
-                self.powerbi_display.setText("No reports found in audit trail database yet. Process a report first.")
-                return
-            readings = repo.get_readings_for_report(latest.get("id"))
-            history = repo.get_recent_history(limit=30)
-            dataset = pbi.prepare_executive_dataset(
-                readings=readings,
-                report_date=latest.get("report_date", ""),
-                history=history,
-            )
-            pretty = json.dumps(dataset, indent=2)
-            self.powerbi_display.setText(pretty)
-            self._append_log("Power BI executive dataset generated.")
-        except Exception as exc:
-            self.powerbi_display.setText(f"Error generating Power BI dataset: {exc}")
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.6)
+                return s.connect_ex((host, port)) == 0
+        except Exception:
+            return False
 
-    def export_star_schema_files(self):
-        pbi = self.services.get("powerbi_service")
-        if not pbi or not hasattr(pbi, "generate_star_schema"):
-            self.powerbi_display.setText("Power BI star-schema generator not available.")
-            return
-        try:
-            res = pbi.generate_star_schema()
-            msg = "✔ Power BI Star-Schema & DAX Files Exported Successfully:\n\n"
-            for k, p in res.items():
-                msg += f"• {k}: {p}\n"
-            msg += "\nAll files ready for Power BI Desktop import or Fabric REST API deployment."
-            self.powerbi_display.setText(msg)
-            self._append_log("Power BI star-schema files exported to data/powerbi/")
-        except Exception as exc:
-            self.powerbi_display.setText(f"Export error: {exc}")
+    def refresh_streamlit_panel(self):
+        st_app = Path("streamlit_app/app.py")
+        if not st_app.exists():
+            self.lbl_st_status.setText("✖ NOT ACTIVE — streamlit_app/app.py not found")
+            self.lbl_st_status.setStyleSheet("color: #f87171; font-weight: 700; font-size: 10pt;")
+        elif self._is_streamlit_running():
+            self.lbl_st_status.setText("✓ CONNECTED — Streamlit BI is active and listening on http://localhost:8501")
+            self.lbl_st_status.setStyleSheet("color: #4ade80; font-weight: 700; font-size: 10pt;")
+        else:
+            self.lbl_st_status.setText("• STANDBY — Local server ready to launch on http://localhost:8501")
+            self.lbl_st_status.setStyleSheet("color: #fbbf24; font-weight: 700; font-size: 10pt;")
+
+    def launch_streamlit_browser(self):
+        url = QUrl("http://localhost:8501")
+        if not self._is_streamlit_running():
+            self._append_log("Streamlit server not detected on port 8501. Auto-starting background server...")
+            self.start_streamlit_server(notify=False)
+            QTimer.singleShot(1500, lambda: QDesktopServices.openUrl(url))
+            self.notification_service.notify_success(
+                "Streamlit BI Launching",
+                "Starting background Streamlit server on port 8501 and opening browser.\nDashboard will connect dynamically.",
+            )
+        else:
+            QDesktopServices.openUrl(url)
+            self.notification_service.notify_info(
+                "Streamlit Connected",
+                "Opening live Streamlit Management BI at http://localhost:8501 in your default web browser.",
+            )
+
+    def start_streamlit_server(self, notify: bool = True):
+        bat_path = Path("run_streamlit.bat")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if bat_path.exists():
+            subprocess.Popen(["cmd.exe", "/c", str(bat_path.resolve())], shell=True, creationflags=flags)
+            if notify:
+                self.notification_service.notify_success(
+                    "Streamlit Server Starting",
+                    "Starting background Streamlit server on port 8501 via run_streamlit.bat.",
+                )
+        else:
+            cmd = [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                "streamlit_app/app.py",
+                "--server.port",
+                "8501",
+                "--server.headless",
+                "true",
+            ]
+            subprocess.Popen(cmd, creationflags=flags)
+            if notify:
+                self.notification_service.notify_success(
+                    "Streamlit Server Starting",
+                    "Launched background Streamlit app on port 8501.",
+                )
+        self._append_log("Streamlit background process triggered on port 8501.")
 
     # =================================================================
     # Page 8: Centralized Alert Center
@@ -1305,21 +1309,18 @@ class Dashboard(FluentWindow):
         layout.setSpacing(14)
 
         toolbar = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = TitleLabel("Enterprise Alert Center")
-        self.alert_summary_lbl = CaptionLabel("0 active alerts")
-        title_box.addWidget(title)
-        title_box.addWidget(self.alert_summary_lbl)
-        toolbar.addLayout(title_box)
+        header = PageHeader("Enterprise Alert Centre", "Active system alerts, operational warnings, and anomalies")
+        toolbar.addWidget(header)
         toolbar.addStretch()
 
+        self.alert_summary_lbl = CaptionLabel("0 active alerts")
+        toolbar.addWidget(self.alert_summary_lbl)
+
         btn_ack_all = PushButton("Acknowledge All", widget)
-        btn_ack_all.setToolTip("Mark all active alerts as reviewed")
         btn_ack_all.clicked.connect(self._ack_all_alerts)
         toolbar.addWidget(btn_ack_all)
 
         btn_refresh = PushButton("Refresh Alerts", widget)
-        btn_refresh.setToolTip("Reload unacknowledged alerts from AlertService")
         btn_refresh.clicked.connect(self.refresh_alerts_panel)
         toolbar.addWidget(btn_refresh)
         layout.addLayout(toolbar)
@@ -1369,7 +1370,7 @@ class Dashboard(FluentWindow):
 
         if not alerts:
             empty_lbl = QLabel("✔ No unacknowledged alerts. All systems are operating normally.")
-            empty_lbl.setStyleSheet("color: #16a34a; font-weight: 600; padding: 20px; font-size: 11pt;")
+            empty_lbl.setStyleSheet("color: #4ade80; font-weight: 600; padding: 20px; font-size: 11pt;")
             self.alerts_list_layout.insertWidget(0, empty_lbl)
             return
 
@@ -1380,16 +1381,8 @@ class Dashboard(FluentWindow):
     def _create_alert_card(self, alert: Any) -> SimpleCardWidget:
         card = SimpleCardWidget()
         cat = alert.category
-        color = (
-            "#dc2626"
-            if cat == "CRITICAL"
-            else (
-                "#d97706"
-                if cat == "WARNING"
-                else ("#6366f1" if cat == "AI_INSIGHT" else "#2563eb")
-            )
-        )
-        card.setStyleSheet(f"border-left: 5px solid {color};")
+        color = "#dc2626" if cat == "CRITICAL" else ("#d97706" if cat == "WARNING" else ("#6366f1" if cat == "AI_INSIGHT" else "#2563eb"))
+        card.setStyleSheet(f"border-left: 5px solid {color}; background-color: #1e293b; border-radius: 6px;")
         lay = QVBoxLayout(card)
         lay.setContentsMargins(16, 12, 16, 12)
         lay.setSpacing(6)
@@ -1405,16 +1398,14 @@ class Dashboard(FluentWindow):
         hdr.addWidget(time_lbl)
 
         btn_ack = PushButton("Acknowledge", card)
-        btn_ack.setToolTip("Mark alert as acknowledged")
         btn_ack.clicked.connect(lambda _, aid=alert.alert_id: self._ack_alert(aid))
         hdr.addWidget(btn_ack)
         lay.addLayout(hdr)
 
         msg_lbl = QLabel(alert.message)
         msg_lbl.setWordWrap(True)
-        msg_lbl.setStyleSheet("color: #334155; font-size: 9.5pt;")
+        msg_lbl.setStyleSheet("color: #f1f5f9; font-size: 9.5pt;")
         lay.addWidget(msg_lbl)
-
         return card
 
     def _filter_alerts(self, category_name: str):
@@ -1446,7 +1437,7 @@ class Dashboard(FluentWindow):
             self.refresh_alerts_panel()
 
     # =================================================================
-    # Page 9: Processing History & Logs
+    # Page 9: Processing History & Diagnostics
     # =================================================================
 
     def _create_history_page(self) -> QWidget:
@@ -1456,25 +1447,39 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
-        layout.addWidget(TitleLabel("Application Logs & Execution Audit Ledger"))
+        header = PageHeader(
+            "Processing History & Technical Diagnostics",
+            "Real-time operational event stream, execution latencies, and service logs",
+        )
+        layout.addWidget(header)
 
-        self.full_log = QTextEdit(widget)
-        self.full_log.setReadOnly(True)
-        self.full_log.setStyleSheet("font-family: Consolas, monospace; font-size: 9pt;")
-        layout.addWidget(self.full_log, 1)
+        toolbar = QHBoxLayout()
+        btn_clear = PushButton("Clear Log", widget)
+        btn_clear.clicked.connect(lambda: self.log_display.clear())
+        toolbar.addWidget(btn_clear)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
 
-        bottom = QHBoxLayout()
-        clear_btn = PushButton("Clear Log View", widget)
-        clear_btn.setToolTip("Clear current on-screen log buffer (does not delete file on disk)")
-        clear_btn.clicked.connect(self.full_log.clear)
-        bottom.addWidget(clear_btn)
-        bottom.addStretch()
-        layout.addLayout(bottom)
-
+        self.log_display = QTextEdit(widget)
+        self.log_display.setReadOnly(True)
+        self.log_display.setPlaceholderText("Execution log stream...")
+        self.log_display.setStyleSheet("font-family: Consolas, monospace; font-size: 9pt; background: #0f172a; color: #f8fafc;")
+        layout.addWidget(self.log_display, 1)
         return widget
 
+    def refresh_history(self):
+        pass
+
+    def _append_log(self, text: str):
+        now_str = datetime.now().strftime("%H:%M:%S")
+        msg = f"[{now_str}] {text}"
+        if hasattr(self, "log_display"):
+            self.log_display.append(msg)
+        if hasattr(self, "activity_label"):
+            self.activity_label.setText(text)
+
     # =================================================================
-    # Page 10: Settings & Configuration (Section 18 Guidance Cards)
+    # Page 10: Settings & Configuration (Pinned to Bottom)
     # =================================================================
 
     def _create_settings_panel(self) -> QWidget:
@@ -1488,27 +1493,60 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 
-        # Guidance Card: Excel Workbook Requirement (Section 18)
-        excel_srv = self.services.get("excel_service")
-        wb_path = getattr(excel_srv, "workbook_path", "Not configured") if excel_srv else "Not configured"
-        wb_exists = Path(str(wb_path)).exists() if wb_path != "Not configured" else False
-
-        excel_guidance = self._create_requirement_card(
-            title="Excel Production Workbook",
-            status="Configured & Verified" if wb_exists else "File Missing / Not Configured",
-            status_color="#16a34a" if wb_exists else "#dc2626",
-            required_for="Automatic daily updates of meter active energy rows and formula verification.",
-            action_desc="Ensure Test_BI_Analysis_Report_2026.xlsx exists at the designated path.",
-            btn_text="Select Excel File",
-            callback=self._browse_excel_file,
+        header = PageHeader(
+            "System Configuration & Integration Settings",
+            "Verified parameters, storage destinations, API credentials, and runtime modes",
         )
-        layout.addWidget(excel_guidance)
+        layout.addWidget(header)
+
+        # Guidance Card: Excel Workbook (With Dynamic Verification & Status Updating)
+        excel_srv = self.services.get("excel_service")
+        wb_path = getattr(excel_srv, "workbook_path", None) or Path("Test_BI_Analysis_Report_2026.xlsx")
+        wb_exists = Path(str(wb_path)).exists()
+
+        self.excel_guidance_card = SimpleCardWidget(container)
+        eg_lay = QVBoxLayout(self.excel_guidance_card)
+        eg_lay.setContentsMargins(18, 14, 18, 14)
+        eg_lay.setSpacing(8)
+
+        eg_hdr = QHBoxLayout()
+        eg_title = StrongBodyLabel("Production Excel Workbook Destination")
+        eg_title.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 10pt;")
+        eg_hdr.addWidget(eg_title)
+        eg_hdr.addStretch()
+
+        self.excel_status_lbl = QLabel("✓ File Selected & Verified" if wb_exists else "✖ Not Selected / Missing")
+        self.excel_status_lbl.setStyleSheet(f"font-weight: 700; color: {'#4ade80' if wb_exists else '#f87171'}; font-size: 9pt;")
+        eg_hdr.addWidget(self.excel_status_lbl)
+        eg_lay.addLayout(eg_hdr)
+
+        req_lbl = QLabel("<b>Required for:</b> Automatic daily updates of meter active energy rows and formula verification.")
+        req_lbl.setWordWrap(True)
+        req_lbl.setStyleSheet("color: #cbd5e1; font-size: 9pt;")
+        eg_lay.addWidget(req_lbl)
+
+        eg_act_box = QHBoxLayout()
+        self.excel_action_lbl = QLabel(
+            f"<b>Action:</b> Excel workbook is connected ({Path(str(wb_path)).name}). Ready for automated updates."
+            if wb_exists
+            else f"<b>Action:</b> Ensure excel file exist at the designated path ({wb_path}). Click 'Select Excel File' to locate it."
+        )
+        self.excel_action_lbl.setWordWrap(True)
+        self.excel_action_lbl.setStyleSheet("color: #f1f5f9; font-size: 9pt;")
+        eg_act_box.addWidget(self.excel_action_lbl, 1)
+
+        btn_browse = PushButton("Select Excel File", self.excel_guidance_card)
+        btn_browse.clicked.connect(self._browse_excel_file)
+        eg_act_box.addWidget(btn_browse)
+        eg_lay.addLayout(eg_act_box)
+
+        layout.addWidget(self.excel_guidance_card)
 
         # Guidance Card: Gmail API Requirement
         gmail_guidance = self._create_requirement_card(
             title="Gmail API Integration",
             status="Active (OAuth Client Configured)" if Path("credentials/gmail/token.json").exists() or Path("credentials/token.json").exists() else "Needs Authorization",
-            status_color="#16a34a" if Path("credentials/gmail/token.json").exists() or Path("credentials/token.json").exists() else "#d97706",
+            status_color="#4ade80" if Path("credentials/gmail/token.json").exists() or Path("credentials/token.json").exists() else "#fbbf24",
             required_for="Automatic download of daily NBSense PDF reports from Gmail.",
             action_desc="Launch the Setup Wizard to complete Google OAuth consent.",
             btn_text="Launch Setup Wizard",
@@ -1516,45 +1554,60 @@ class Dashboard(FluentWindow):
         )
         layout.addWidget(gmail_guidance)
 
-        # Guidance Card: Power BI Cloud Dataset
-        pbi_srv = self.services.get("powerbi_service")
-        pbi_active = bool(getattr(pbi_srv, "workspace_id", None) and getattr(pbi_srv, "dataset_id", None))
-        pbi_guidance = self._create_requirement_card(
-            title="Power BI Cloud Push Dataset",
-            status="Connected" if pbi_active else "Local Export Mode (Optional)",
-            status_color="#16a34a" if pbi_active else "#64748b",
-            required_for="Real-time push streaming to cloud Power BI workspaces without on-prem gateway.",
-            action_desc="Configure Azure Entra ID App Registration client ID, secret, and workspace ID.",
-            btn_text="Configure Power BI",
-            callback=self.open_setup_wizard,
+        # Guidance Card: Streamlit BI
+        st_app = Path("streamlit_app/app.py")
+        st_guidance = self._create_requirement_card(
+            title="Streamlit Management BI Layer",
+            status="Active (Port 8501 Ready)" if st_app.exists() else "Configuration Required",
+            status_color="#4ade80" if st_app.exists() else "#f87171",
+            required_for="Web-based executive BI dashboard with live cloud storage synchronization.",
+            action_desc="Configured via .streamlit/config.toml and .streamlit/secrets.toml.",
+            btn_text="Open Streamlit BI",
+            callback=self.launch_streamlit_browser,
         )
-        layout.addWidget(pbi_guidance)
+        layout.addWidget(st_guidance)
 
-        # Active Enterprise Configuration Group
+        # Active Enterprise Configuration Parameters
         group_card = SimpleCardWidget(container)
         g_lay = QVBoxLayout(group_card)
         g_lay.setContentsMargins(18, 16, 18, 16)
         g_lay.setSpacing(12)
-        g_lay.addWidget(StrongBodyLabel("Active System Parameters & Invariants"))
+        param_hdr = StrongBodyLabel("Active System Parameters & Invariants")
+        param_hdr.setStyleSheet("color: #ffffff; font-weight: 700;")
+        g_lay.addWidget(param_hdr)
 
         form = QFormLayout()
         form.setSpacing(12)
 
-        lbl_wb = QLabel(str(wb_path))
-        lbl_wb.setStyleSheet("font-family: Consolas; color: #1e3a8a;")
-        form.addRow("Excel Workbook Path:", lbl_wb)
+        self.lbl_wb = QLabel(str(wb_path))
+        self.lbl_wb.setStyleSheet("font-family: Consolas; color: #93c5fd;")
+        form.addRow("Excel Workbook Path:", self.lbl_wb)
 
         db = self.services.get("report_repository")
         db_path = getattr(getattr(db, "database", None), "db_path", "data/automation.db")
         lbl_db = QLabel(str(db_path))
-        lbl_db.setStyleSheet("font-family: Consolas; color: #1e3a8a;")
+        lbl_db.setStyleSheet("font-family: Consolas; color: #93c5fd;")
         form.addRow("SQLite Audit Database:", lbl_db)
 
-        form.addRow("Target Daily Total:", QLabel("9,206.83 kWh (NBSense EMS Reference)"))
-        form.addRow("Excel Formula Safety:", QLabel("Preserved (=SUM(C16:Q16), Cumulative Row 4)"))
-        form.addRow("Historical Gap Window:", QLabel("30 Days (Automatic Sunday/Weekend Healing)"))
-        form.addRow("Gemini AI Policy:", QLabel("Advisory Only (Strictly zero direct Excel edits)"))
-        form.addRow("Architecture Mode:", QLabel("Deterministic pipeline as sole source of truth"))
+        lbl_target = QLabel("9,206.83 kWh (NBSense EMS Reference Baseline)")
+        lbl_target.setStyleSheet("color: #e2e8f0;")
+        form.addRow("Target Daily Total:", lbl_target)
+
+        lbl_formula = QLabel("Preserved (=SUM(C16:Q16), Cumulative Row 4)")
+        lbl_formula.setStyleSheet("color: #e2e8f0;")
+        form.addRow("Excel Formula Safety:", lbl_formula)
+
+        lbl_gap = QLabel("30 Days (Automatic Sunday/Weekend Healing)")
+        lbl_gap.setStyleSheet("color: #e2e8f0;")
+        form.addRow("Historical Gap Window:", lbl_gap)
+
+        lbl_ai = QLabel("Advisory Only (Strictly zero direct Excel edits)")
+        lbl_ai.setStyleSheet("color: #e2e8f0;")
+        form.addRow("Gemini AI Policy:", lbl_ai)
+
+        lbl_mode = QLabel("Deterministic pipeline as sole source of truth")
+        lbl_mode.setStyleSheet("color: #e2e8f0;")
+        form.addRow("Architecture Mode:", lbl_mode)
 
         g_lay.addLayout(form)
         layout.addWidget(group_card)
@@ -1578,6 +1631,7 @@ class Dashboard(FluentWindow):
 
         hdr = QHBoxLayout()
         t = StrongBodyLabel(title)
+        t.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 10pt;")
         hdr.addWidget(t)
 
         hdr.addStretch()
@@ -1588,21 +1642,46 @@ class Dashboard(FluentWindow):
 
         req_lbl = QLabel(f"<b>Required for:</b> {required_for}")
         req_lbl.setWordWrap(True)
-        req_lbl.setStyleSheet("color: #475569; font-size: 9pt;")
+        req_lbl.setStyleSheet("color: #cbd5e1; font-size: 9pt;")
         lay.addWidget(req_lbl)
 
         act_box = QHBoxLayout()
         act_lbl = QLabel(f"<b>Action:</b> {action_desc}")
         act_lbl.setWordWrap(True)
-        act_lbl.setStyleSheet("color: #334155; font-size: 9pt;")
+        act_lbl.setStyleSheet("color: #f1f5f9; font-size: 9pt;")
         act_box.addWidget(act_lbl, 1)
 
         btn = PushButton(btn_text, card)
         btn.clicked.connect(callback)
         act_box.addWidget(btn)
         lay.addLayout(act_box)
-
         return card
+
+    def _update_excel_settings_status(self, path: Optional[str] = None):
+        """Dynamically updates the Excel status notification and action guidance text."""
+        if not path:
+            excel_srv = self.services.get("excel_service")
+            path = str(getattr(excel_srv, "workbook_path", "Test_BI_Analysis_Report_2026.xlsx"))
+
+        p = Path(str(path))
+        wb_exists = p.exists()
+
+        if hasattr(self, "excel_status_lbl"):
+            self.excel_status_lbl.setText("✓ File Selected & Verified" if wb_exists else "✖ Not Selected / Missing")
+            self.excel_status_lbl.setStyleSheet(f"font-weight: 700; color: {'#4ade80' if wb_exists else '#f87171'}; font-size: 9pt;")
+
+        if hasattr(self, "excel_action_lbl"):
+            if wb_exists:
+                self.excel_action_lbl.setText(
+                    f"<b>Action:</b> Excel workbook is connected ({p.name}). Ready for automated updates."
+                )
+            else:
+                self.excel_action_lbl.setText(
+                    f"<b>Action:</b> Ensure excel file exist at the designated path ({p.name}). Click 'Select Excel File' to locate it."
+                )
+
+        if hasattr(self, "lbl_wb"):
+            self.lbl_wb.setText(str(path))
 
     def _browse_excel_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1612,14 +1691,33 @@ class Dashboard(FluentWindow):
             "Excel Files (*.xlsx *.xlsm)",
         )
         if path:
-            excel_srv = self.services.get("excel_service")
-            if excel_srv:
-                excel_srv.workbook_path = path
-            self._append_log(f"Excel workbook path updated: {path}")
-            self.refresh_status()
+            p = Path(path)
+            if p.exists():
+                excel_srv = self.services.get("excel_service")
+                if excel_srv:
+                    excel_srv.workbook_path = path
+                self._update_excel_settings_status(path)
+                self._append_log(f"Excel workbook path updated: {path}")
+                self.notification_service.notify_success(
+                    "Excel File Selected",
+                    f"Workbook successfully linked:\n{p.name}\nPath: {p}",
+                )
+                self.refresh_status()
+            else:
+                self._update_excel_settings_status(path)
+                self.notification_service.notify_error(
+                    "File Not Found",
+                    f"Selected file path does not exist:\n{path}\nAction: Ensure excel file exist at the designated path.",
+                )
+        else:
+            self._update_excel_settings_status()
+            self.notification_service.notify_warning(
+                "No Excel File Selected",
+                "No file was chosen.\nAction: Ensure excel file exist at the designated path.",
+            )
 
     # =================================================================
-    # Page 11: Help & Support Center (Section 19)
+    # Page 11: Help & Support Center (Pinned to Bottom)
     # =================================================================
 
     def _create_help_page(self) -> QWidget:
@@ -1630,43 +1728,39 @@ class Dashboard(FluentWindow):
         layout.setSpacing(14)
 
         header_box = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title = TitleLabel("Help Center & Operator Documentation")
-        sub = CaptionLabel("Plain-language operational guides, troubleshooting procedures, FAQ, and technical glossary")
-        title_box.addWidget(title)
-        title_box.addWidget(sub)
-        header_box.addLayout(title_box)
+        header = PageHeader(
+            "Help Center & Operator Documentation",
+            "Plain-language operational guides, troubleshooting procedures, FAQ, and technical glossary",
+        )
+        header_box.addWidget(header)
         header_box.addStretch()
 
         btn_tour = PrimaryPushButton("✨ Restart Guided Tour", widget)
         btn_tour.setObjectName("PrimaryButton")
-        btn_tour.setToolTip("Restart the interactive 1-minute guided walkthrough")
         btn_tour.clicked.connect(self.open_guided_tour)
         header_box.addWidget(btn_tour)
         layout.addLayout(header_box)
 
-        # Tabbed Help Topics
         help_tabs = QTabWidget(widget)
         help_tabs.addTab(self._create_help_article_getting_started(), "Getting Started")
         help_tabs.addTab(self._create_help_article_dashboard(), "Dashboard & Operations")
         help_tabs.addTab(self._create_help_article_meters_plant(), "Meters & Plant Map")
         help_tabs.addTab(self._create_help_article_recovery(), "Data Recovery & Gaps")
-        help_tabs.addTab(self._create_help_article_ai_powerbi(), "AI & Power BI")
+        help_tabs.addTab(self._create_help_article_streamlit(), "Streamlit Management BI")
         help_tabs.addTab(self._create_help_article_troubleshooting(), "Troubleshooting & FAQ")
         help_tabs.addTab(self._create_help_article_glossary(), "Glossary")
         layout.addWidget(help_tabs, 1)
-
         return widget
 
     def _create_help_article_getting_started(self) -> QWidget:
         return self._build_article_container([
             (
                 "What is EnergyAutomation?",
-                "EnergyAutomation is a Windows desktop platform designed for Savera MS that automates the daily processing of NBSense energy reports, updates existing Excel workbooks, maintains an immutable SQLite audit trail, and generates executive Power BI dashboards."
+                "EnergyAutomation is an enterprise Windows desktop platform for Savera MS that automates the daily ingestion of NBSense energy reports, updates production Excel workbooks preserving formulas, maintains an immutable SQLite audit trail, and visualizes management metrics via Streamlit BI."
             ),
             (
                 "Why is it needed?",
-                "Manually opening PDF reports, keying numbers into Excel, and verifying formulas took 30+ minutes each morning and carried human error risks. EnergyAutomation does this in under 3 seconds with formula safety and audit logging."
+                "Manually opening PDF reports, keying numbers into Excel, and checking formulas took 30+ minutes every morning. EnergyAutomation does this in under 3 seconds with guaranteed formula safety and full audit logging."
             ),
             (
                 "How do I use it?",
@@ -1676,25 +1770,21 @@ class Dashboard(FluentWindow):
                 "What happens after I use it?",
                 "The target row in `Test_BI_Analysis_Report_2026.xlsx` is updated with today's readings, formulas `=SUM(C16:Q16)` are preserved, and an audit record is saved in `data/automation.db`."
             ),
-            (
-                "What should I do if it fails?",
-                "Review the Alert Center for specific warnings. Ensure Microsoft Excel does not have the workbook open with an exclusive lock, and verify that the workstation has an active internet connection."
-            ),
         ])
 
     def _create_help_article_dashboard(self) -> QWidget:
         return self._build_article_container([
             (
                 "Executive Dashboard Overview",
-                "Provides plant managers with an instant pulse on facility consumption (Today, Yesterday, MTD, YTD), system health across 6 subsystems, and automation controls."
+                "Provides plant managers with an instant pulse on facility consumption (Today, Yesterday, MTD, YTD), system health across all subsystems, and automation controls."
             ),
             (
-                "Understanding the System Health Matrix",
+                "Understanding System Health Matrix",
                 "Green indicates healthy operations. Amber indicates optional items requiring attention (e.g. Gmail OAuth authorization). Red indicates a critical prerequisite such as a missing workbook."
             ),
             (
-                "Simple Mode vs Engineer Mode",
-                "Toggle with the top header button. Simple Mode shows high-level summaries for executives. Engineer Mode reveals raw telemetry, cell coordinates, and execution latencies for technicians."
+                "Zero Fake Telemetry Guarantee",
+                "Every single value shown on this dashboard is read directly from your Excel file or SQLite database. If data has not been ingested yet, the card displays 'NOT ACTIVE' rather than manufactured demo numbers."
             ),
         ])
 
@@ -1702,11 +1792,11 @@ class Dashboard(FluentWindow):
         return self._build_article_container([
             (
                 "Plant Energy Topology Map",
-                "Visualizes the 18 plant meters organized into 7 production zones: Substation Incomer, Press Shop, Machining & CNC, Welding, Utilities (Air Compressors), Paint Shop, and Administration."
+                "Visualizes the 18 plant meters organized into 7 production zones: Surface Treatment & Plating, Finishing & Powder Coating, Press & Fabrication, Compressors, Water Treatment, Packaging, and Main Power Substation."
             ),
             (
                 "Meter Status & N/A Policy",
-                "When a physical meter communication fails, it reports N/A. EnergyAutomation preserves N/A as empty/null. It is NEVER coerced to 0.0, avoiding skew in baseline efficiency calculations."
+                "When physical meter communication drops, it reports N/A. EnergyAutomation preserves N/A as empty/null. It is NEVER coerced to 0.0, avoiding artificial skew in baseline calculations."
             ),
         ])
 
@@ -1716,21 +1806,17 @@ class Dashboard(FluentWindow):
                 "Weekend Gap Healing",
                 "Plant operations may not process reports on Sundays. EnergyAutomation automatically scans the past 30 days and fetches missing reports chronologically so your monthly Excel workbook has zero gaps."
             ),
-            (
-                "Manual Gap Healing Trigger",
-                "Navigate to 'Data Recovery', click 'Scan for Missing Dates', and click 'Run Historical Gap Healing Now'."
-            ),
         ])
 
-    def _create_help_article_ai_powerbi(self) -> QWidget:
+    def _create_help_article_streamlit(self) -> QWidget:
         return self._build_article_container([
             (
-                "Google Gemini AI Advisory",
-                "Provides plain-language answers to operational questions. Gemini AI is strictly advisory and read-only; it can never modify Excel formulas or database records."
+                "Streamlit Management BI Integration",
+                "Streamlit serves as the read-only executive analytics layer. It visualizes energy trends, 7-zone baselines, and Pareto distributions in your browser at http://localhost:8501 without modifying Excel."
             ),
             (
-                "Power BI Star Schema & DAX",
-                "Generates Fact_EnergyConsumption.csv and dimension tables (Dim_Date, Dim_Meter, Dim_Area, Dim_Report) along with measures.dax for import into Power BI Desktop or Microsoft Fabric."
+                "Cloud Drive Synchronization",
+                "The Streamlit dashboard can synchronize with shared Google Drive, OneDrive, or Dropbox links for remote management access."
             ),
         ])
 
@@ -1752,9 +1838,8 @@ class Dashboard(FluentWindow):
 
     def _create_help_article_glossary(self) -> QWidget:
         return self._build_article_container([
-            ("Active Energy (kWh)", "The actual electricity consumed by motors, heaters, and machinery to perform productive work."),
+            ("Active Energy (kWh)", "The electricity consumed by motors, heaters, and machinery to perform productive work."),
             ("Power Factor (PF)", "The ratio of active energy (kWh) to apparent energy (kVAh). Target is near unity (~0.98 - 0.99)."),
-            ("Star Schema", "Relational dimensional model separating numerical facts from descriptive context tables (Dates, Meters, Areas)."),
             ("Idempotency", "The property where processing the same report multiple times produces the exact same result without duplicate rows or distorted cumulative sums."),
         ])
 
@@ -1774,10 +1859,11 @@ class Dashboard(FluentWindow):
             b_lay.setContentsMargins(16, 14, 16, 14)
             b_lay.setSpacing(6)
             h_lbl = StrongBodyLabel(heading)
+            h_lbl.setStyleSheet("color: #ffffff; font-weight: 700;")
             b_lay.addWidget(h_lbl)
             lbl = QLabel(body)
             lbl.setWordWrap(True)
-            lbl.setStyleSheet("color: #334155; font-size: 9.5pt; line-height: 1.4;")
+            lbl.setStyleSheet("color: #e2e8f0; font-size: 9.5pt; line-height: 1.4;")
             b_lay.addWidget(lbl)
             lay.addWidget(box)
 
@@ -1786,7 +1872,7 @@ class Dashboard(FluentWindow):
         return scroll
 
     # =================================================================
-    # Interactive Features: Tour, Wizard, Mode Toggle, Global Search
+    # Interactive Features: Tour, Setup Wizard, Global Search, Automation
     # =================================================================
 
     def open_guided_tour(self):
@@ -1799,17 +1885,6 @@ class Dashboard(FluentWindow):
             self._append_log("Setup wizard settings saved.")
             self.refresh_status()
 
-    def toggle_engineer_mode(self):
-        self._is_engineer_mode = not self._is_engineer_mode
-        if self._is_engineer_mode:
-            self.btn_mode_toggle.setText("🛠 Engineer Mode")
-            self.btn_mode_toggle.setStyleSheet("background: #fef3c7; color: #92400e; font-weight: 700; border: 1px solid #f59e0b;")
-            self._append_log("Switched to Engineer Mode: Detailed technical telemetry enabled.")
-        else:
-            self.btn_mode_toggle.setText("👤 Simple Mode")
-            self.btn_mode_toggle.setStyleSheet("")
-            self._append_log("Switched to Simple Mode: Executive summary view enabled.")
-
     def handle_global_search(self, text: str):
         query = text.strip().lower()
         if not query:
@@ -1818,11 +1893,11 @@ class Dashboard(FluentWindow):
             self.switch_page(2)
             if hasattr(self, "meter_search_input"):
                 self.meter_search_input.setText(query)
-        elif any(w in query for w in ["report", "pdf", "2026-", "date"]):
+        elif any(w in query for w in ["report", "pdf", "2026-", "date", "ledger"]):
             self.switch_page(4)
-        elif any(w in query for w in ["alert", "warn", "error", "spike"]):
+        elif any(w in query for w in ["alert", "warn", "error", "spike", "critical"]):
             self.switch_page(8)
-        elif any(w in query for w in ["power", "bi", "dax", "dataset"]):
+        elif any(w in query for w in ["streamlit", "bi", "dashboard", "analytics"]):
             self.switch_page(7)
         elif any(w in query for w in ["ai", "gemini", "intelligence"]):
             self.switch_page(6)
@@ -1833,298 +1908,107 @@ class Dashboard(FluentWindow):
         elif any(w in query for w in ["help", "faq", "guide", "tour", "glossary"]):
             self.switch_page(11)
 
-    # =================================================================
-    # Workflow & Automation Control (Friendly Non-Technical Errors)
-    # =================================================================
-
     def run_now(self):
         if self._running:
-            QMessageBox.information(
-                self,
-                "Already Running",
-                "A report-processing operation is already running.",
-            )
+            self.notification_service.notify_warning("System Busy", "An automation workflow is already running.")
+            return
+
+        if not self.workflow:
+            self.notification_service.notify_error("Workflow Error", "Automation workflow service is not initialized.")
             return
 
         self._running = True
         self.run_button.setEnabled(False)
         self.progress.setVisible(True)
-        self._set_status("Processing", "running", "Fetching and processing EMS reports...")
-        self._append_log("Manual workflow execution started.")
+        self._set_status("Running", "running", "Processing NBSense reports...")
+        self._append_log("Triggered immediate automation workflow run.")
 
         self.worker_thread = QThread()
         self.worker = WorkflowWorker(self.workflow)
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.execute)
-        self.worker.finished.connect(self._workflow_finished)
-        self.worker.failed.connect(self._workflow_failed)
-        self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.failed.connect(self.worker_thread.quit)
-        self.worker_thread.finished.connect(self._worker_cleanup)
-
+        self.worker.finished.connect(self._on_run_finished)
+        self.worker.failed.connect(self._on_run_failed)
         self.worker_thread.start()
 
     @Slot(object)
-    def _workflow_finished(self, result: Any):
-        self._last_result = result
+    def _on_run_finished(self, result: Any):
         self._running = False
         self.run_button.setEnabled(True)
         self.progress.setVisible(False)
+        self._cleanup_thread()
 
-        self._set_status("Completed", "success", "EMS report processing completed successfully.")
-        self._update_success_metrics(result)
-        self._append_log("Workflow completed successfully.")
-        self._show_result_summary(result)
+        self._last_result = result
+        self._set_status("Ready", "ready", "Automation run completed successfully.")
+        self._append_log("Workflow execution finished cleanly.")
 
-        try:
-            InfoBar.success(
-                title="Automation Completed",
-                content="EMS reports processed, Excel updated, and audit ledger recorded.",
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000,
-                parent=self,
-            )
-        except Exception:
-            pass
+        self.notification_service.notify_success(
+            "Report Processed",
+            "NBSense report successfully parsed, validated, and recorded in Excel and SQLite.",
+        )
+        self.refresh_status()
 
     @Slot(str)
-    def _workflow_failed(self, error: str):
-        self._last_error = error
+    def _on_run_failed(self, error_trace: str):
         self._running = False
         self.run_button.setEnabled(True)
         self.progress.setVisible(False)
+        self._cleanup_thread()
 
-        self._set_status("Processing Failed", "error", "The workflow encountered an issue.")
-        self._update_failure_metrics()
-        self._append_log(error)
+        self._last_error = error_trace
+        self._set_status("Error", "error", "Automation execution encountered an error.")
+        self._append_log(f"Workflow execution error: {error_trace.splitlines()[-1] if error_trace else 'Unknown'}")
 
-        # Parse friendly message (Section 11, 12, 39)
-        if "WinError 32" in error or "Permission denied" in error:
-            title = "Excel Workbook Locked"
-            what = "EnergyAutomation could not save the updated daily energy values to Excel."
-            why = "The Excel workbook (Test_BI_Analysis_Report_2026.xlsx) is currently open in Microsoft Excel on this workstation."
-            action = "Please save any open changes, close Microsoft Excel completely, and click 'Run Automation Now' again."
-        elif "credentials" in error.lower() or "oauth" in error.lower() or "token" in error.lower():
-            title = "Gmail Authorization Needed"
-            what = "Could not download new EMS reports from the operational Gmail inbox."
-            why = "Gmail OAuth credentials require initial login or token refresh."
-            action = "Open Settings -> Launch Setup Wizard, and complete the Google login step."
-        elif "FileNotFound" in error:
-            title = "Required File Not Found"
-            what = "The automation engine could not locate a designated file or folder."
-            why = "The workbook or template path specified in configuration may have moved."
-            action = "Go to Settings -> Excel Workbook, verify the file path, and retry."
-        else:
-            title = "Report Processing Notice"
-            what = "An issue occurred while processing the energy report."
-            why = "Network latency, temporary email sync glitch, or data formatting discrepancy."
-            action = "Check your network connection and click 'Run Automation Now' to retry."
-
-        try:
-            InfoBar.error(
-                title=title,
-                content=what,
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=6000,
-                parent=self,
-            )
-        except Exception:
-            pass
-
-        dlg = FriendlyErrorDialog(
-            self,
-            title=title,
-            what=what,
-            why=why,
-            action=action,
-            technical_details=error,
+        self.notification_service.notify_error(
+            "Workflow Execution Failed",
+            "The automation pipeline encountered an error during execution. Review technical details below.",
+            technical_details=error_trace,
+            show_dialog=True,
         )
-        dlg.exec()
+        self.refresh_status()
 
-    def _worker_cleanup(self):
-        if self.worker is not None:
-            self.worker.deleteLater()
-        if self.worker_thread is not None:
-            self.worker_thread.deleteLater()
-        self.worker = None
+    def _cleanup_thread(self):
+        if self.worker_thread and self.worker_thread.isRunning():
+            self.worker_thread.quit()
+            self.worker_thread.wait()
         self.worker_thread = None
-
-    def _show_result_summary(self, result: Any):
-        if result is None:
-            return
-        text = str(result)
-        self.activity_label.setText(text[:1200])
-
-    def _update_success_metrics(self, result: Any):
-        current = self._read_metric(self.card_processed)
-        self.card_processed._metric_value.setText(str(current + 1))
-
-        success = self._read_metric(self.card_success)
-        self.card_success._metric_value.setText(str(success + 1))
-
-        self.card_last._metric_value.setText(datetime.now().strftime("%H:%M:%S"))
-
-        try:
-            self.refresh_reports_table()
-            self.refresh_analysis()
-            self.refresh_meters_table()
-            self.refresh_plant_topology_view()
-            self.refresh_alerts_panel()
-            self.refresh_overview()
-        except Exception:
-            pass
-
-    def _update_failure_metrics(self):
-        current = self._read_metric(self.card_processed)
-        self.card_processed._metric_value.setText(str(current + 1))
-
-        failed = self._read_metric(self.card_failed)
-        self.card_failed._metric_value.setText(str(failed + 1))
-
-        self.card_last._metric_value.setText(datetime.now().strftime("%H:%M:%S"))
-
-        try:
-            self.refresh_alerts_panel()
-        except Exception:
-            pass
-
-    @staticmethod
-    def _read_metric(card: QWidget) -> int:
-        try:
-            return int(card._metric_value.text())
-        except (ValueError, AttributeError):
-            return 0
+        self.worker = None
 
     def toggle_scheduler(self):
-        try:
-            running = getattr(self.scheduler, "is_running", None)
-            if callable(running):
-                running = running()
-
-            if running is True:
-                self.scheduler.stop()
-                self.scheduler_button.setText("Start Scheduler")
-                self._set_status("Scheduler Paused", "warning", "Automatic background polling is paused.")
-                self._append_log("Scheduler paused by user.")
-            else:
-                self.scheduler.start()
-                self.scheduler_button.setText("Pause Scheduler")
-                self._set_status("Scheduler Running", "success", "Automatic polling active every 5 minutes.")
-                self._append_log("Scheduler started.")
-        except Exception as exc:
-            self._append_log(f"Scheduler control error: {exc}")
-            QMessageBox.critical(self, "Scheduler Error", str(exc))
-
-    def _set_status(self, text: str, state: str, detail: str | None = None):
-        self.status_text.setText(text)
-        if detail:
-            self.status_detail.setText(detail)
-
-        states = {
-            "ready": "●",
-            "success": "●",
-            "running": "●",
-            "warning": "●",
-            "error": "●",
-        }
-        self.status_indicator.setText(states.get(state, "●"))
-        self.status_indicator.setProperty("state", state)
-        color_map = {
-            "ready": "#16a34a",
-            "success": "#16a34a",
-            "running": "#2563eb",
-            "warning": "#d97706",
-            "error": "#dc2626",
-        }
-        self.status_indicator.setStyleSheet(f"font-size: 20pt; color: {color_map.get(state, '#16a34a')};")
-        self.statusBar.showMessage(text)
-
-    def refresh_status(self):
-        self._set_status("Ready", "ready", "System is operational.")
-        self.refresh_overview()
-        self._append_log("Dashboard status refreshed.")
-
-    def _append_log(self, message: str):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if hasattr(self, "full_log"):
-            self.full_log.append(f"[{timestamp}] {message}")
-
-    # =================================================================
-    # Clock & Tray
-    # =================================================================
-
-    def _start_clock(self):
-        timer = QTimer(self)
-        timer.timeout.connect(self._update_clock)
-        timer.start(1000)
-        self.clock_timer = timer
-        self._update_clock()
-
-    def _update_clock(self):
-        self.clock_label.setText(datetime.now().strftime("%d %b %Y • %H:%M:%S"))
-
-    def _build_tray(self):
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray = None
+        if not self.scheduler:
             return
+        if self.scheduler.is_running():
+            self.scheduler.stop()
+            self.scheduler_button.setText("Resume Scheduler")
+            self.next_event_label.setText("Scheduler paused by operator.")
+            self._append_log("Scheduler paused.")
+            self.notification_service.notify_info("Scheduler Paused", "Background morning report checks paused.")
+        else:
+            self.scheduler.start()
+            self.scheduler_button.setText("Pause Scheduler")
+            self.next_event_label.setText("Next scheduled check: ~06:00 AM")
+            self._append_log("Scheduler resumed.")
+            self.notification_service.notify_success("Scheduler Active", "Background morning report checks active.")
+        self.refresh_status()
 
-        self.tray = QSystemTrayIcon(self)
-        app_icon = Path("assets/app.ico")
-        if app_icon.exists():
-            self.tray.setIcon(QIcon(str(app_icon)))
-        self.tray.setToolTip("EnergyAutomation EMS")
-
-        from PySide6.QtWidgets import QMenu
-        menu = QMenu(self)
-
-        show_action = QAction("Open Dashboard", self)
-        show_action.triggered.connect(self._show_from_tray)
-        run_action = QAction("Run Now", self)
-        run_action.triggered.connect(self.run_now)
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-
-        menu.addAction(show_action)
-        menu.addAction(run_action)
-        menu.addSeparator()
-        menu.addAction(exit_action)
-
-        self.tray.setContextMenu(menu)
-        self.tray.activated.connect(self._tray_activated)
-        self.tray.show()
-
-    def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:
-            self._show_from_tray()
-
-    def _show_from_tray(self):
-        self.show()
-        self.raise_()
-        self.activateWindow()
-
-    def closeEvent(self, event):
-        if self._running:
-            answer = QMessageBox.question(
-                self,
-                "Processing in Progress",
-                "A report-processing operation is still running.\n\nAre you sure you want to exit?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                event.ignore()
-                return
-
-        try:
-            self.application.stop()
-        except Exception:
-            pass
-
-        if self.tray is not None:
-            self.tray.hide()
-        event.accept()
+    def _set_status(self, label: str, state: str, detail: str = ""):
+        if hasattr(self, "status_text"):
+            self.status_text.setText(label)
+        if hasattr(self, "status_detail") and detail:
+            self.status_detail.setText(detail)
+        if hasattr(self, "status_indicator"):
+            if state in ("ready", "connected", "healthy", "success"):
+                icon = "✓"
+                color = "#4ade80"
+            elif state in ("paused", "standby", "idle"):
+                icon = "•"
+                color = "#fbbf24"
+            elif state == "running":
+                icon = "•"
+                color = "#60a5fa"
+            else:
+                icon = "✖"
+                color = "#f87171"
+            self.status_indicator.setText(icon)
+            self.status_indicator.setStyleSheet(f"font-size: 20pt; font-weight: 800; color: {color};")

@@ -1,8 +1,0 @@
-AreaKey,AreaName,Section,Building,NominalDaily_kWh,TargetEfficiency
-plating,Surface Treatment & Plating Plant,Shop Floor A,Bldg 1 - Chemical Processing,160.0,>= 92%
-coating,Finishing & Powder Coating Plant,Shop Floor B,Bldg 2 - Finishing,2100.0,>= 92%
-fabrication,Press & Fabrication Line,Shop Floor C,Bldg 3 - Metal Forming,1250.0,>= 92%
-compressors,Compressed Air Generation Substation,Utility Block 1,Bldg 4 - Utilities,1850.0,>= 92%
-water_treatment,RO & DM Water Treatment Facility,Utility Block 2,Bldg 4 - Utilities,430.0,>= 92%
-packaging,Packaging & Stitching Line,Shop Floor D,Bldg 5 - Logistics,500.0,>= 92%
-main_power,Main Power Substation & Incomer,Substation,Bldg 0 - Electrical Yard,3200.0,>= 92%

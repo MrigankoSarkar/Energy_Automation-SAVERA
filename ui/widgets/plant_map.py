@@ -35,6 +35,7 @@ class ZoneDetailDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Area Inspection — {zone_info.get('name')}")
         self.resize(600, 420)
+        self.setStyleSheet("background-color: #0f172a; color: #ffffff;")
         self._build_ui(zone_info)
 
     def _build_ui(self, z: Dict[str, Any]):
@@ -44,19 +45,19 @@ class ZoneDetailDialog(QDialog):
 
         # Header Info
         hdr_frame = QFrame()
-        hdr_frame.setStyleSheet("background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;")
+        hdr_frame.setStyleSheet("background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px;")
         hdr_layout = QVBoxLayout(hdr_frame)
 
         title = QLabel(z.get("name", "Zone"))
-        title.setStyleSheet("font-size: 13pt; font-weight: 700; color: #0f172a;")
+        title.setStyleSheet("font-size: 13pt; font-weight: 700; color: #ffffff;")
         hdr_layout.addWidget(title)
 
         loc = QLabel(f"Location: {z.get('section', '')} • {z.get('building', '')}")
-        loc.setStyleSheet("color: #64748b; font-size: 9.5pt;")
+        loc.setStyleSheet("color: #cbd5e1; font-size: 9.5pt;")
         hdr_layout.addWidget(loc)
 
         desc = QLabel(z.get("description", ""))
-        desc.setStyleSheet("color: #334155; font-size: 9pt; margin-top: 4px;")
+        desc.setStyleSheet("color: #e2e8f0; font-size: 9pt; margin-top: 4px;")
         desc.setWordWrap(True)
         hdr_layout.addWidget(desc)
 
@@ -65,6 +66,7 @@ class ZoneDetailDialog(QDialog):
         # Metrics row
         metrics_box = QHBoxLayout()
         tot_lbl = QLabel(f"Active Consumption: <b>{z.get('total_energy', 0.0):,.2f} kWh</b> ({z.get('percentage_of_total', 0.0)}% of plant)")
+        tot_lbl.setStyleSheet("color: #ffffff; font-size: 9.5pt;")
         metrics_box.addWidget(tot_lbl)
         metrics_box.addStretch()
 
@@ -123,16 +125,16 @@ class PlantMapWidget(QWidget):
         toolbar = QHBoxLayout()
         title_box = QVBoxLayout()
         title = QLabel("Savera MS — Plant Energy Topology Map")
-        title.setStyleSheet("font-size: 13pt; font-weight: 700; color: #0f172a;")
+        title.setStyleSheet("font-size: 13pt; font-weight: 700; color: #ffffff;")
         sub = QLabel("Abstract plant layout & production area energy distribution • Click any zone to inspect")
-        sub.setStyleSheet("font-size: 9.5pt; color: #64748b;")
+        sub.setStyleSheet("font-size: 9.5pt; color: #cbd5e1;")
         title_box.addWidget(title)
         title_box.addWidget(sub)
         toolbar.addLayout(title_box)
         toolbar.addStretch()
 
         self.total_plant_label = QLabel("Plant Total: — kWh")
-        self.total_plant_label.setStyleSheet("font-size: 11pt; font-weight: 700; color: #1e40af; background: #eff6ff; padding: 6px 14px; border-radius: 8px; border: 1px solid #bfdbfe;")
+        self.total_plant_label.setStyleSheet("font-size: 11pt; font-weight: 700; color: #60a5fa; background: #1e293b; padding: 6px 14px; border-radius: 8px; border: 1px solid #3b82f6;")
         toolbar.addWidget(self.total_plant_label)
 
         btn_refresh = QPushButton("Refresh Topology")
@@ -142,7 +144,9 @@ class PlantMapWidget(QWidget):
 
         # Legend
         legend = QHBoxLayout()
-        legend.addWidget(QLabel("Zone Status:"))
+        lbl_legend_title = QLabel("Zone Status:")
+        lbl_legend_title.setStyleSheet("font-size: 9pt; color: #cbd5e1; font-weight: 600;")
+        legend.addWidget(lbl_legend_title)
         legend.addWidget(self._create_legend_dot("#16a34a", "🟢 Normal (<= Baseline)"))
         legend.addWidget(self._create_legend_dot("#d97706", "🟡 Warning (> 115% Baseline)"))
         legend.addWidget(self._create_legend_dot("#dc2626", "🔴 High Consumption (> 130%)"))
@@ -165,7 +169,7 @@ class PlantMapWidget(QWidget):
     @staticmethod
     def _create_legend_dot(color: str, label: str) -> QLabel:
         lbl = QLabel(label)
-        lbl.setStyleSheet("font-size: 9pt; color: #475569; margin-right: 12px;")
+        lbl.setStyleSheet("font-size: 9pt; color: #cbd5e1; margin-right: 12px;")
         return lbl
 
     def update_data(self, readings: List[Dict[str, Any]]):
@@ -181,6 +185,10 @@ class PlantMapWidget(QWidget):
         """Re-render current topology data."""
         if self._last_topology_data:
             self.render_topology(self._last_topology_data)
+
+    def refresh_topology(self):
+        """Alias for refresh_view."""
+        self.refresh_view()
 
     def render_topology(self, topo: Dict[str, Any]):
         """Render all zone cards in the responsive grid."""
@@ -229,15 +237,15 @@ class PlantMapWidget(QWidget):
 
         card.setStyleSheet(f"""
             QFrame {{
-                background: white;
-                border: 1px solid #e2e8f0;
+                background: #1e293b;
+                border: 1px solid #334155;
                 border-left: 5px solid {border_color};
                 border-radius: 10px;
                 padding: 14px;
             }}
             QFrame:hover {{
-                border-color: #2563eb;
-                background: {bg_tint};
+                border-color: #3b82f6;
+                background: #243247;
             }}
         """)
 
@@ -247,7 +255,7 @@ class PlantMapWidget(QWidget):
         # Header with Name & Status Badge
         top_row = QHBoxLayout()
         name_lbl = QLabel(z.get("name", "Zone"))
-        name_lbl.setStyleSheet("font-size: 10.5pt; font-weight: 700; color: #0f172a;")
+        name_lbl.setStyleSheet("font-size: 10.5pt; font-weight: 700; color: #ffffff;")
         top_row.addWidget(name_lbl)
         top_row.addStretch()
 
@@ -257,19 +265,19 @@ class PlantMapWidget(QWidget):
         layout.addLayout(top_row)
 
         loc_lbl = QLabel(f"{z.get('section')} • {z.get('building')}")
-        loc_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        loc_lbl.setStyleSheet("color: #cbd5e1; font-size: 8.5pt;")
         layout.addWidget(loc_lbl)
 
         # Consumption metric
         val_box = QHBoxLayout()
         kwh_lbl = QLabel(f"{z.get('total_energy', 0.0):,.2f} kWh")
-        kwh_lbl.setStyleSheet("font-size: 15pt; font-weight: 700; color: #1e293b;")
+        kwh_lbl.setStyleSheet("font-size: 15pt; font-weight: 700; color: #ffffff;")
         val_box.addWidget(kwh_lbl)
         val_box.addStretch()
 
         pct = z.get("percentage_of_total", 0.0)
         pct_lbl = QLabel(f"{pct}% of plant")
-        pct_lbl.setStyleSheet("color: #2563eb; font-weight: 600; font-size: 9.5pt;")
+        pct_lbl.setStyleSheet("color: #60a5fa; font-weight: 600; font-size: 9.5pt;")
         val_box.addWidget(pct_lbl)
         layout.addLayout(val_box)
 
@@ -280,7 +288,7 @@ class PlantMapWidget(QWidget):
         progress.setTextVisible(False)
         progress.setFixedHeight(6)
         progress.setStyleSheet(f"""
-            QProgressBar {{ background: #f1f5f9; border-radius: 3px; border: none; }}
+            QProgressBar {{ background: #334155; border-radius: 3px; border: none; }}
             QProgressBar::chunk {{ background: {border_color}; border-radius: 3px; }}
         """)
         layout.addWidget(progress)
@@ -290,7 +298,7 @@ class PlantMapWidget(QWidget):
         active_m = z.get("active_meters_count", 0)
         tot_m = len(z.get("meters", []))
         m_lbl = QLabel(f"{active_m}/{tot_m} active meters")
-        m_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        m_lbl.setStyleSheet("color: #cbd5e1; font-size: 8.5pt;")
         bottom_row.addWidget(m_lbl)
         bottom_row.addStretch()
 

@@ -4,7 +4,7 @@
   "gmail": {
     "sender": "alerts@nbsense.com",
     "subject_contains": "Ems Monitoring Report",
-    "search_days": 2
+    "search_days": 1
   },
   "pdf": {
     "expected_unit": "kWh"
@@ -22,7 +22,7 @@
   "automation": {
     "check_interval_minutes": 5,
     "start_automatically": true,
-    "start_minimized": false
+    "start_minimized": true
   },
   "validation": {
     "minimum_active_energy": 0,
@@ -33,9 +33,10 @@
     "model": "gemini-2.5-flash",
     "api_key": ""
   },
-  "powerbi": {
-    "enabled": false,
-    "workspace_id": "",
-    "dataset_id": ""
+  "streamlit": {
+    "enabled": true,
+    "cloud_url": "http://localhost:8501",
+    "cache_ttl_seconds": 300,
+    "auto_launch_browser": true
   }
 }

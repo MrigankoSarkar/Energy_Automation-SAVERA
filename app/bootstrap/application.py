@@ -17,9 +17,14 @@ class Application:
         if with_ui:
             try:
                 self.dashboard = Dashboard(self)
-            except Exception:
-                # Allow headless operation if Qt display server cannot create widgets
-                self.dashboard = None
+            except Exception as exc:
+                import logging
+                import os
+                logging.getLogger("EnergyAutomation").error("Failed to initialize UI Dashboard: %s", exc, exc_info=True)
+                if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+                    self.dashboard = None
+                else:
+                    raise
 
     def start(self):
         settings_path = Path("config") / "settings.json"

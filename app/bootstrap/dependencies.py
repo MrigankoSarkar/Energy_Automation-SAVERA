@@ -44,10 +44,6 @@ from app.services.ai.gemini_service import GeminiService
 from app.services.ai.analyzer import EnergyAnalyzer
 from app.services.ai.decision_engine import AIDecisionEngine
 
-from app.services.powerbi.service import PowerBIService
-from app.services.powerbi.publisher import PowerBIPublisher
-from app.services.powerbi.refresh import PowerBIRefreshService
-
 from app.services.notification.service import NotificationService
 from app.events.bus import get_event_bus
 from app.services.alert.service import AlertService
@@ -681,98 +677,10 @@ def build_services(
         },
     )
 
-    # =========================================================================
-    # POWER BI
-    # =========================================================================
-
-    powerbi_enabled = bool(
-        powerbi_settings.get(
-            "enabled",
-            False,
-        )
-    )
-
-    tenant_id = powerbi_settings.get(
-        "tenant_id"
-    )
-
-    client_id = powerbi_settings.get(
-        "client_id"
-    )
-
-    client_secret = powerbi_settings.get(
-        "client_secret"
-    )
-
-    workspace_id = powerbi_settings.get(
-        "workspace_id"
-    )
-
-    dataset_id = powerbi_settings.get(
-        "dataset_id"
-    )
-
-    # First create the core Power BI service.
-    powerbi_service = _construct(
-        PowerBIService,
-        candidates={
-            "enabled":
-                powerbi_enabled,
-
-            "tenant_id":
-                tenant_id,
-
-            "client_id":
-                client_id,
-
-            "client_secret":
-                client_secret,
-
-            "workspace_id":
-                workspace_id,
-
-            "dataset_id":
-                dataset_id,
-        },
-    )
-
-    # The actual constructors require the PowerBI service.
-    powerbi_publisher = PowerBIPublisher(
-        powerbi_service
-    )
-
-    powerbi_refresh_service = (
-        PowerBIRefreshService(
-            powerbi_service
-        )
-    )
-
-    # Attach helpers to the core service where supported.
-    try:
-
-        powerbi_service.publisher = (
-            powerbi_publisher
-        )
-
-    except Exception as exc:
-
-        logger.warning(
-            "Unable to attach Power BI publisher: %s",
-            exc,
-        )
-
-    try:
-
-        powerbi_service.refresh_service = (
-            powerbi_refresh_service
-        )
-
-    except Exception as exc:
-
-        logger.warning(
-            "Unable to attach Power BI refresh service: %s",
-            exc,
-        )
+    # Power BI removed in favor of Streamlit Management BI
+    powerbi_service = None
+    powerbi_publisher = None
+    powerbi_refresh_service = None
 
     # =========================================================================
     # NOTIFICATION
@@ -1065,22 +973,6 @@ def build_services(
 
         "ai_decision_engine":
             ai_decision_engine,
-
-        # Power BI
-        "powerbi":
-            powerbi_service,
-
-        "powerbi_service":
-            powerbi_service,
-
-        "powerbi_publisher":
-            powerbi_publisher,
-
-        "powerbi_refresh":
-            powerbi_refresh_service,
-
-        "powerbi_refresh_service":
-            powerbi_refresh_service,
 
         # Notifications
         "notification":

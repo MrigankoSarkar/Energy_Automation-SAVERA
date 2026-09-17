@@ -294,16 +294,9 @@ class AlertService:
                 )
                 generated.append(alert)
 
-            # Rule 4: Power BI sync pending or error
-            pbi_res = p.get("powerbi")
-            if pbi_res and not pbi_res.get("success", False):
-                alert = self.raise_alert(
-                    category=AlertCategory.INFO,
-                    title="Power BI Sync Pending / Deferred",
-                    message=pbi_res.get("message") or "Power BI synchronization is in local export mode.",
-                    source="powerbi",
-                )
-                generated.append(alert)
+            # Rule 4: Workbook update notice
+            if excel_res and hasattr(excel_res, "updated_row") and excel_res.updated_row:
+                pass
 
             # Rule 5: AI anomaly detected
             ai_res = p.get("ai")

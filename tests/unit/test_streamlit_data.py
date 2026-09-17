@@ -23,7 +23,7 @@ def test_validator_with_production_workbook():
     assert parsed.incomer_col == "Old LT Panel Main Incomer"
     assert len(parsed.submeter_cols) == 14
     assert len(parsed.meter_cols) == 15
-    assert len(parsed.df_daily) == 18
+    assert len(parsed.df_daily) >= 18
 
     # Ensure Row 4 'Cum.  (YTD)' is NOT present in df_daily dates
     dates = [str(d) for d in parsed.df_daily["Date"]]

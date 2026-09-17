@@ -1,2 +1,0 @@
-ReportId,ReportDate,AttachmentName,AttachmentHash,MeterCount,MappedCount,TotalEnergy_kWh,ExcelStatus,PowerBIStatus,ProcessedAt
-1,2026-09-15,report.pdf,hash123,18,15,9206.83,UPDATED,PENDING,2026-09-15T12:03:37.528422
