@@ -47,6 +47,7 @@ from app.services.ai.decision_engine import AIDecisionEngine
 from app.services.notification.service import NotificationService
 from app.events.bus import get_event_bus
 from app.services.alert.service import AlertService
+from app.services.alert.socket_hub import AlertSocketHub
 from app.services.analytics.plant_topology import PlantTopologyService
 
 from app.orchestration.retry import RetryService
@@ -733,7 +734,17 @@ def build_services(
     # =========================================================================
 
     event_bus = get_event_bus()
-    alert_service = AlertService(database=database, event_bus=event_bus)
+    alert_socket_hub = AlertSocketHub()
+    try:
+        alert_socket_hub.start()
+    except Exception as exc:
+        logger.warning(f"Could not start AlertSocketHub: {exc}")
+
+    alert_service = AlertService(
+        database=database,
+        event_bus=event_bus,
+        socket_hub=alert_socket_hub,
+    )
     plant_topology = PlantTopologyService()
 
     workflow = _construct(
@@ -876,6 +887,9 @@ def build_services(
 
             "alert_service":
                 alert_service,
+
+            "alert_socket_hub":
+                alert_socket_hub,
         },
     )
 
@@ -1010,6 +1024,9 @@ def build_services(
 
         "alert_service":
             alert_service,
+
+        "alert_socket_hub":
+            alert_socket_hub,
 
         "plant_topology":
             plant_topology,

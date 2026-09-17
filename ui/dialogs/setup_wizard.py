@@ -254,6 +254,11 @@ class SetupWizardDialog(QDialog):
         header.addLayout(title_box)
         header.addStretch()
 
+        self.btn_header_back = TransparentPushButton("← Back to Dashboard", self)
+        self.btn_header_back.setCursor(Qt.PointingHandCursor)
+        self.btn_header_back.clicked.connect(self.reject)
+        header.addWidget(self.btn_header_back)
+
         root.addLayout(header)
 
         # Content pages
@@ -270,9 +275,9 @@ class SetupWizardDialog(QDialog):
 
         # Bottom navigation
         nav = QHBoxLayout()
-        self.btn_back = PushButton("← Back", self)
+        self.btn_back = PushButton("← Back to Dashboard", self)
         self.btn_back.clicked.connect(self._go_back)
-        self.btn_back.setEnabled(False)
+        self.btn_back.setEnabled(True)
         nav.addWidget(self.btn_back)
 
         nav.addStretch()
@@ -589,6 +594,8 @@ class SetupWizardDialog(QDialog):
         if self.current_step > 0:
             self.current_step -= 1
             self._update_step_view()
+        else:
+            self.reject()
 
     def _update_step_view(self):
         self.pages.setCurrentIndex(self.current_step)
@@ -604,7 +611,12 @@ class SetupWizardDialog(QDialog):
         ]
         self.step_title.setText(f"Setup — {step_names[self.current_step]}")
         self.step_subtitle.setText(f"Step {self.current_step + 1} of {self.total_steps}")
-        self.btn_back.setEnabled(self.current_step > 0)
+        self.btn_back.setEnabled(True)
+        if self.current_step == 0:
+            self.btn_back.setText("← Back to Dashboard")
+        else:
+            self.btn_back.setText("← Back")
+
         if self.current_step == self.total_steps - 1:
             self.btn_next.setText("Save && Start")
         else:

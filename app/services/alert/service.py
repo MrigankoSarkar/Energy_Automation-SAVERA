@@ -44,12 +44,25 @@ class AlertService:
     deduplication, persistent state, and rule-based triggering.
     """
 
-    def __init__(self, database: Any = None, event_bus: Any = None) -> None:
+    def __init__(self, database: Any = None, event_bus: Any = None, socket_hub: Any = None) -> None:
         self.database = database
         self.event_bus = event_bus
+        self.socket_hub = socket_hub
         self._alerts: List[Alert] = []
         self._lock = threading.RLock()
         self._init_db()
+        if self.socket_hub:
+            self._attach_socket_hub(self.socket_hub)
+
+    def attach_socket_hub(self, hub: Any) -> None:
+        self.socket_hub = hub
+        self._attach_socket_hub(hub)
+
+    def _attach_socket_hub(self, hub: Any) -> None:
+        hub.get_alerts_handler = lambda: [a.to_dict() for a in self.get_alerts(unacknowledged_only=True)]
+        hub.get_stats_handler = self.get_counts
+        hub.ack_handler = self.acknowledge
+        hub.ack_all_handler = self.acknowledge_all
 
     def _init_db(self) -> None:
         """Create alerts table in SQLite database if available."""
@@ -170,6 +183,13 @@ class AlertService:
             except Exception:
                 pass
 
+        # Broadcast over Socket.IO
+        if self.socket_hub:
+            try:
+                self.socket_hub.broadcast_alert(alert.to_dict())
+            except Exception:
+                pass
+
         return alert
 
     def acknowledge(self, alert_id: str) -> bool:
@@ -186,6 +206,11 @@ class AlertService:
                             )
                         except Exception as exc:
                             logger.warning(f"Could not update alert acknowledgment in DB: {exc}")
+                    if self.socket_hub:
+                        try:
+                            self.socket_hub.broadcast_ack(alert_id)
+                        except Exception:
+                            pass
                     return True
         return False
 
@@ -200,6 +225,11 @@ class AlertService:
             if self.database:
                 try:
                     self.database.execute("UPDATE alerts SET acknowledged = 1")
+                except Exception:
+                    pass
+            if self.socket_hub and count > 0:
+                try:
+                    self.socket_hub.broadcast_ack_all(count)
                 except Exception:
                     pass
         return count

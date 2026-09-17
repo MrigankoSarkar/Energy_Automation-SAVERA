@@ -158,16 +158,24 @@ class GuidedTourDialog(QDialog):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(14)
 
+        # Top header with Back to Dashboard button and step counter
+        top_bar = QHBoxLayout()
+        self.btn_top_back = TransparentPushButton("← Back to Dashboard", self)
+        self.btn_top_back.setCursor(Qt.PointingHandCursor)
+        self.btn_top_back.clicked.connect(self.reject)
+        top_bar.addWidget(self.btn_top_back)
+        top_bar.addStretch()
+
+        self.step_counter = CaptionLabel(f"Step 1 of {self.total_stops}", self)
+        top_bar.addWidget(self.step_counter)
+        root.addLayout(top_bar)
+
         # Progress bar
         self.progress = ProgressBar(self)
         self.progress.setRange(0, self.total_stops)
         self.progress.setValue(1)
         self.progress.setFixedHeight(6)
         root.addWidget(self.progress)
-
-        # Step counter
-        self.step_counter = CaptionLabel(f"Step 1 of {self.total_stops}", self)
-        root.addWidget(self.step_counter)
 
         # Content card
         self.card = ElevatedCardWidget(self)
@@ -225,9 +233,9 @@ class GuidedTourDialog(QDialog):
 
         nav.addStretch()
 
-        self.btn_prev = PushButton("← Previous", self)
+        self.btn_prev = PushButton("← Back to Dashboard", self)
         self.btn_prev.clicked.connect(self._go_prev)
-        self.btn_prev.setEnabled(False)
+        self.btn_prev.setEnabled(True)
         nav.addWidget(self.btn_prev)
 
         self.btn_next = PrimaryPushButton("Next →", self)
@@ -253,6 +261,8 @@ class GuidedTourDialog(QDialog):
         if self.current_idx > 0:
             self.current_idx -= 1
             self._update_stop()
+        else:
+            self.reject()
 
     def _update_stop(self):
         s = TOUR_STOPS[self.current_idx]
@@ -264,7 +274,11 @@ class GuidedTourDialog(QDialog):
 
         self.progress.setValue(self.current_idx + 1)
         self.step_counter.setText(f"Step {self.current_idx + 1} of {self.total_stops}")
-        self.btn_prev.setEnabled(self.current_idx > 0)
+        self.btn_prev.setEnabled(True)
+        if self.current_idx == 0:
+            self.btn_prev.setText("← Back to Dashboard")
+        else:
+            self.btn_prev.setText("← Back")
 
         if self.current_idx == self.total_stops - 1:
             self.btn_next.setText("Finish Tour")

@@ -115,6 +115,87 @@ class WorkflowWorker(QObject):
 
 
 # =====================================================================
+# Real-Time Socket.IO Client Worker for Alert Streaming
+# =====================================================================
+
+class AlertSocketWorker(QObject):
+    connected = Signal(str)
+    disconnected = Signal()
+    alert_created = Signal(dict)
+    alert_acknowledged = Signal(str)
+    stats_updated = Signal(dict)
+    all_acknowledged = Signal(int)
+
+    def __init__(self, target_url: str):
+        super().__init__()
+        self.target_url = target_url
+        self._running = False
+        self._sio: Any = None
+        self._thread: Optional[threading.Thread] = None
+
+    def start_worker(self):
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run_client, name="AlertSocketWorkerThread", daemon=True)
+        self._thread.start()
+
+    def _run_client(self):
+        try:
+            import socketio
+            self._sio = socketio.Client(reconnection=True, reconnection_attempts=20, reconnection_delay=2)
+
+            @self._sio.event
+            def connect():
+                self.connected.emit(self.target_url)
+
+            @self._sio.event
+            def disconnect():
+                self.disconnected.emit()
+
+            @self._sio.on("initial_state")
+            def on_initial_state(data):
+                if isinstance(data, dict):
+                    if "stats" in data:
+                        self.stats_updated.emit(data["stats"])
+
+            @self._sio.on("alert_created")
+            def on_alert_created(data):
+                if isinstance(data, dict):
+                    self.alert_created.emit(data)
+
+            @self._sio.on("alert_acknowledged")
+            def on_ack(data):
+                aid = data.get("alert_id", "") if isinstance(data, dict) else str(data)
+                self.alert_acknowledged.emit(aid)
+
+            @self._sio.on("alert_stats")
+            def on_stats(data):
+                if isinstance(data, dict):
+                    self.stats_updated.emit(data)
+
+            @self._sio.on("all_alerts_acknowledged")
+            def on_all_ack(data):
+                cnt = data.get("count", 0) if isinstance(data, dict) else 0
+                self.all_acknowledged.emit(cnt)
+
+            self._sio.connect(self.target_url, transports=["websocket", "polling"], wait_timeout=5)
+            self._sio.wait()
+        except Exception:
+            self.disconnected.emit()
+        finally:
+            self._running = False
+
+    def stop_worker(self):
+        self._running = False
+        try:
+            if self._sio and self._sio.connected:
+                self._sio.disconnect()
+        except Exception:
+            pass
+
+
+# =====================================================================
 # Main Enterprise Dashboard Shell (PySide6 + QFluentWidgets)
 # =====================================================================
 
@@ -128,6 +209,7 @@ class Dashboard(FluentWindow):
     - Centralized notification system with expandable technical details
     - Dedicated Streamlit Management BI integration
     - Light-Themed Tour & Setup Experience
+    - Real-Time Socket.IO Alert Streaming & Dynamic State Synchronization
     """
 
     def __init__(self, application: Any, parent: QWidget | None = None):
@@ -149,6 +231,11 @@ class Dashboard(FluentWindow):
         self._last_result: Any = None
         self._last_error: str | None = None
 
+        # Real-Time Alert Cards State
+        self.alert_cards_map: Dict[str, QWidget] = {}
+        self.active_alert_filter: str = "All"
+        self.alert_socket_worker: Optional[AlertSocketWorker] = None
+
         self.setWindowTitle("EnergyAutomation — EMS Monitoring")
         app_icon = Path("assets/app.ico")
         if app_icon.exists():
@@ -166,6 +253,9 @@ class Dashboard(FluentWindow):
         self._build_subinterfaces()
         self._build_title_bar()
         self._start_clock()
+
+        # Connect Real-Time Socket.IO Alert Client
+        self._init_alert_socket_client()
 
         # Load dynamic data
         self.refresh_status()
@@ -1060,6 +1150,22 @@ class Dashboard(FluentWindow):
         )
         layout.addWidget(header)
 
+        # Live AI Service Status & Setup Banner
+        self.ai_status_card = SimpleCardWidget(widget)
+        as_lay = QHBoxLayout(self.ai_status_card)
+        as_lay.setContentsMargins(14, 10, 14, 10)
+        as_lay.setSpacing(10)
+
+        self.lbl_ai_panel_status = QLabel()
+        as_lay.addWidget(self.lbl_ai_panel_status, 1)
+
+        self.btn_ai_cfg = PushButton("Configure API Key in Settings", self.ai_status_card)
+        self.btn_ai_cfg.clicked.connect(lambda: self.switchTo(self.page_settings))
+        as_lay.addWidget(self.btn_ai_cfg)
+
+        layout.addWidget(self.ai_status_card)
+        self._update_ai_panel_status_card()
+
         q_box = QHBoxLayout()
         self.ai_query_input = SearchLineEdit(widget)
         self.ai_query_input.setPlaceholderText("Ask an operational question (e.g. 'What was the total energy consumed on the latest report?')")
@@ -1090,6 +1196,25 @@ class Dashboard(FluentWindow):
         self.ai_response_display.setStyleSheet("font-family: Consolas, monospace; font-size: 9.5pt;")
         layout.addWidget(self.ai_response_display, 1)
         return widget
+
+    def _update_ai_panel_status_card(self):
+        if not hasattr(self, "lbl_ai_panel_status"):
+            return
+        gemini = self.services.get("gemini_service")
+        has_key = bool(gemini and getattr(gemini, "api_key", None))
+        if has_key:
+            model = getattr(gemini, "model", "gemini-2.5-flash") or "gemini-2.5-flash"
+            self.lbl_ai_panel_status.setText(
+                f"<b>Status:</b> <span style='color: #4ade80;'>✓ Connected to Google Gemini ({model})</span> "
+                "— Cloud advisory intelligence is active."
+            )
+            self.btn_ai_cfg.setText("Manage API Key")
+        else:
+            self.lbl_ai_panel_status.setText(
+                "<b>Status:</b> <span style='color: #fbbf24;'>• Offline Fallback Active (Deterministic Engine)</span> "
+                "— Enter a Google Gemini API Key in Settings to enable cloud AI reasoning."
+            )
+            self.btn_ai_cfg.setText("Configure API Key in Settings")
 
     def _set_and_ask_ai(self, text: str):
         self.ai_query_input.setText(text)
@@ -1298,8 +1423,30 @@ class Dashboard(FluentWindow):
         self._append_log("Streamlit background process triggered on port 8501.")
 
     # =================================================================
-    # Page 8: Centralized Alert Center
+    # Page 8: Centralized Alert Center (Rebuilt with Real-Time Socket.IO)
     # =================================================================
+
+    def _init_alert_socket_client(self):
+        """Connects the asynchronous Socket.IO client worker to the AlertSocketHub."""
+        hub = self.services.get("alert_socket_hub")
+        url = hub.get_url() if hub else "http://127.0.0.1:8765"
+        self.alert_socket_worker = AlertSocketWorker(target_url=url)
+        self.alert_socket_worker.connected.connect(self._on_socket_connected)
+        self.alert_socket_worker.disconnected.connect(self._on_socket_disconnected)
+        self.alert_socket_worker.alert_created.connect(self._on_socket_alert_created)
+        self.alert_socket_worker.alert_acknowledged.connect(self._on_socket_alert_acknowledged)
+        self.alert_socket_worker.stats_updated.connect(self._on_socket_stats_updated)
+        self.alert_socket_worker.all_acknowledged.connect(self._on_socket_all_acknowledged)
+        self.alert_socket_worker.start_worker()
+
+    def closeEvent(self, event):
+        """Gracefully disconnect Socket.IO and shutdown background services on window close."""
+        if hasattr(self, "alert_socket_worker") and self.alert_socket_worker:
+            self.alert_socket_worker.stop_worker()
+        hub = self.services.get("alert_socket_hub")
+        if hub:
+            hub.stop()
+        super().closeEvent(event)
 
     def _create_alerts_panel(self) -> QWidget:
         widget = QWidget()
@@ -1308,23 +1455,60 @@ class Dashboard(FluentWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
+        # Top Toolbar
         toolbar = QHBoxLayout()
-        header = PageHeader("Enterprise Alert Centre", "Active system alerts, operational warnings, and anomalies")
+        header = PageHeader(
+            "Enterprise Real-Time Alert Centre",
+            "Live Socket.IO stream • Real-time anomaly detection • Instant zero-polling acknowledgment",
+        )
         toolbar.addWidget(header)
         toolbar.addStretch()
 
-        self.alert_summary_lbl = CaptionLabel("0 active alerts")
-        toolbar.addWidget(self.alert_summary_lbl)
+        # Real-Time Socket.IO Connection Badge
+        self.socket_status_badge = QLabel("• Connecting (Socket.IO)...")
+        self.socket_status_badge.setStyleSheet("""
+            color: #fbbf24;
+            font-weight: 700;
+            font-size: 8.5pt;
+            background-color: #78350f;
+            border: 1px solid #d97706;
+            border-radius: 6px;
+            padding: 5px 12px;
+        """)
+        toolbar.addWidget(self.socket_status_badge)
+
+        btn_test = PushButton("⚡ Test Alert Broadcast", widget)
+        btn_test.setToolTip("Broadcast a sample anomaly over Socket.IO to verify real-time event pipeline")
+        btn_test.clicked.connect(self._test_alert_broadcast)
+        toolbar.addWidget(btn_test)
 
         btn_ack_all = PushButton("Acknowledge All", widget)
         btn_ack_all.clicked.connect(self._ack_all_alerts)
         toolbar.addWidget(btn_ack_all)
 
-        btn_refresh = PushButton("Refresh Alerts", widget)
+        btn_refresh = PushButton("Refresh", widget)
         btn_refresh.clicked.connect(self.refresh_alerts_panel)
         toolbar.addWidget(btn_refresh)
         layout.addLayout(toolbar)
 
+        # KPI Metrics Ribbon (5 Live Metric Tiles)
+        kpi_ribbon = QHBoxLayout()
+        kpi_ribbon.setSpacing(10)
+
+        self.kpi_card_total = self._create_alert_kpi_card("TOTAL ACTIVE", "0", "#f8fafc", "val_total_active")
+        self.kpi_card_critical = self._create_alert_kpi_card("CRITICAL", "0", "#f87171", "val_critical")
+        self.kpi_card_warning = self._create_alert_kpi_card("WARNING", "0", "#fbbf24", "val_warning")
+        self.kpi_card_info = self._create_alert_kpi_card("INFO", "0", "#60a5fa", "val_info")
+        self.kpi_card_ai = self._create_alert_kpi_card("AI INSIGHTS", "0", "#c084fc", "val_ai")
+
+        kpi_ribbon.addWidget(self.kpi_card_total)
+        kpi_ribbon.addWidget(self.kpi_card_critical)
+        kpi_ribbon.addWidget(self.kpi_card_warning)
+        kpi_ribbon.addWidget(self.kpi_card_info)
+        kpi_ribbon.addWidget(self.kpi_card_ai)
+        layout.addLayout(kpi_ribbon)
+
+        # Filter Box with Category Pills
         filter_box = QHBoxLayout()
         self.alert_filter_group = QButtonGroup(widget)
         for idx, cat_name in enumerate(["All", "CRITICAL", "WARNING", "INFO", "AI_INSIGHT"]):
@@ -1336,8 +1520,13 @@ class Dashboard(FluentWindow):
             self.alert_filter_group.addButton(b, idx)
             filter_box.addWidget(b)
         filter_box.addStretch()
+
+        self.alert_summary_lbl = CaptionLabel("0 active alerts")
+        self.alert_summary_lbl.setStyleSheet("color: #94a3b8; font-size: 8.5pt;")
+        filter_box.addWidget(self.alert_summary_lbl)
         layout.addLayout(filter_box)
 
+        # Scrollable Alert Cards List
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -1351,6 +1540,186 @@ class Dashboard(FluentWindow):
         self.refresh_alerts_panel()
         return widget
 
+    def _create_alert_kpi_card(self, label: str, value: str, text_color: str, obj_name: str) -> SimpleCardWidget:
+        card = SimpleCardWidget()
+        card.setFixedHeight(68)
+        card.setStyleSheet(f"""
+            SimpleCardWidget {{
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-top: 3px solid {text_color};
+                border-radius: 6px;
+            }}
+        """)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(14, 8, 14, 8)
+        lay.setSpacing(2)
+
+        lbl_title = QLabel(label)
+        lbl_title.setStyleSheet("font-size: 7.5pt; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px;")
+        lay.addWidget(lbl_title)
+
+        lbl_val = QLabel(value)
+        lbl_val.setObjectName(obj_name)
+        lbl_val.setStyleSheet(f"font-size: 15pt; font-weight: 800; color: {text_color};")
+        lay.addWidget(lbl_val)
+        return card
+
+    def _set_kpi_value(self, card: SimpleCardWidget, obj_name: str, value: str):
+        lbl = card.findChild(QLabel, obj_name)
+        if lbl:
+            lbl.setText(value)
+
+    # -----------------------------------------------------------------
+    # Socket.IO Real-Time Client Event Handlers
+    # -----------------------------------------------------------------
+
+    @Slot(str)
+    def _on_socket_connected(self, url: str):
+        if hasattr(self, "socket_status_badge"):
+            self.socket_status_badge.setText("✓ Socket.IO Connected (Real-Time Live)")
+            self.socket_status_badge.setStyleSheet("""
+                color: #4ade80;
+                font-weight: 700;
+                font-size: 8.5pt;
+                background-color: #064e3b;
+                border: 1px solid #059669;
+                border-radius: 6px;
+                padding: 5px 12px;
+            """)
+            self.socket_status_badge.setToolTip(f"Real-Time WebSocket stream connected: {url}")
+        self._append_log(f"Alert Centre connected to Socket.IO real-time event hub ({url}).")
+
+    @Slot()
+    def _on_socket_disconnected(self):
+        if hasattr(self, "socket_status_badge"):
+            self.socket_status_badge.setText("• Standby (Polling Fallback)")
+            self.socket_status_badge.setStyleSheet("""
+                color: #fbbf24;
+                font-weight: 700;
+                font-size: 8.5pt;
+                background-color: #78350f;
+                border: 1px solid #d97706;
+                border-radius: 6px;
+                padding: 5px 12px;
+            """)
+            self.socket_status_badge.setToolTip("Socket.IO disconnected. Operating in local SQLite audit mode.")
+
+    @Slot(dict)
+    def _on_socket_alert_created(self, alert_data: dict):
+        """Real-time dynamic arrival of a new alert via Socket.IO."""
+        aid = alert_data.get("alert_id") or alert_data.get("id", "")
+        if aid in self.alert_cards_map:
+            return
+
+        if hasattr(self, "alerts_empty_label") and self.alerts_empty_label:
+            self.alerts_empty_label.deleteLater()
+            self.alerts_empty_label = None
+
+        card = self._create_alert_card(alert_data)
+        self.alerts_list_layout.insertWidget(0, card)
+
+        cat = alert_data.get("category", "")
+        if self.active_alert_filter != "All" and self.active_alert_filter != cat:
+            card.hide()
+        else:
+            card.show()
+
+        self._sync_alert_counts()
+
+        title = alert_data.get("title", "New Alert")
+        msg = alert_data.get("message", "")
+        if cat == "CRITICAL":
+            InfoBar.error(
+                title=f"Critical Alert: {title}",
+                content=msg[:120],
+                orient=Qt.Horizontal,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+                parent=self,
+            )
+        elif cat == "WARNING":
+            InfoBar.warning(
+                title=f"Warning Alert: {title}",
+                content=msg[:120],
+                orient=Qt.Horizontal,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+                parent=self,
+            )
+        else:
+            InfoBar.info(
+                title=f"Alert: {title}",
+                content=msg[:120],
+                orient=Qt.Horizontal,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=3000,
+                parent=self,
+            )
+
+    @Slot(str)
+    def _on_socket_alert_acknowledged(self, alert_id: str):
+        """Real-time removal of an acknowledged alert via Socket.IO."""
+        if alert_id in self.alert_cards_map:
+            card = self.alert_cards_map.pop(alert_id)
+            card.deleteLater()
+
+        if not self.alert_cards_map:
+            self._render_empty_alerts_state()
+
+        self._sync_alert_counts()
+
+    @Slot(dict)
+    def _on_socket_stats_updated(self, stats: dict):
+        """Update KPI tiles dynamically from real-time Socket.IO stats payload."""
+        total = stats.get("total", 0)
+        crit = stats.get("CRITICAL", 0)
+        warn = stats.get("WARNING", 0)
+        info = stats.get("INFO", 0)
+        ai = stats.get("AI_INSIGHT", 0)
+
+        self._set_kpi_value(self.kpi_card_total, "val_total_active", str(total))
+        self._set_kpi_value(self.kpi_card_critical, "val_critical", str(crit))
+        self._set_kpi_value(self.kpi_card_warning, "val_warning", str(warn))
+        self._set_kpi_value(self.kpi_card_info, "val_info", str(info))
+        self._set_kpi_value(self.kpi_card_ai, "val_ai", str(ai))
+
+        if hasattr(self, "alert_summary_lbl"):
+            self.alert_summary_lbl.setText(
+                f"{total} active alert(s) • {crit} Critical, {warn} Warning, {ai} AI Insights"
+            )
+
+    @Slot(int)
+    def _on_socket_all_acknowledged(self, count: int):
+        """Handle real-time all-acknowledged event."""
+        for card in self.alert_cards_map.values():
+            card.deleteLater()
+        self.alert_cards_map.clear()
+        self._render_empty_alerts_state()
+        self._on_socket_stats_updated({"total": 0, "CRITICAL": 0, "WARNING": 0, "INFO": 0, "AI_INSIGHT": 0})
+
+    def _sync_alert_counts(self):
+        alert_srv = self.services.get("alert_service")
+        if alert_srv:
+            counts = alert_srv.get_counts()
+            self._on_socket_stats_updated(counts)
+
+    def _render_empty_alerts_state(self):
+        if hasattr(self, "alerts_empty_label") and self.alerts_empty_label:
+            return
+        self.alerts_empty_label = QLabel("✔ All Systems Operational — No unacknowledged alerts.\nReal-Time Socket.IO monitoring active.")
+        self.alerts_empty_label.setAlignment(Qt.AlignCenter)
+        self.alerts_empty_label.setStyleSheet("""
+            color: #4ade80;
+            font-weight: 600;
+            padding: 30px;
+            font-size: 11pt;
+            background-color: #0f172a;
+            border: 1px dashed #334155;
+            border-radius: 8px;
+        """)
+        self.alerts_list_layout.insertWidget(0, self.alerts_empty_label)
+
     def refresh_alerts_panel(self):
         alert_srv = self.services.get("alert_service")
         if not alert_srv or not hasattr(self, "alerts_list_layout"):
@@ -1360,81 +1729,174 @@ class Dashboard(FluentWindow):
             item = self.alerts_list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self.alert_cards_map.clear()
+        self.alerts_empty_label = None
 
         alerts = alert_srv.get_alerts(unacknowledged_only=True)
         counts = alert_srv.get_counts()
-        self.alert_summary_lbl.setText(
-            f"{counts.get('total', 0)} active alert(s) • "
-            f"{counts.get('CRITICAL', 0)} Critical, {counts.get('WARNING', 0)} Warning, {counts.get('AI_INSIGHT', 0)} AI Insights"
-        )
+        self._on_socket_stats_updated(counts)
 
         if not alerts:
-            empty_lbl = QLabel("✔ No unacknowledged alerts. All systems are operating normally.")
-            empty_lbl.setStyleSheet("color: #4ade80; font-weight: 600; padding: 20px; font-size: 11pt;")
-            self.alerts_list_layout.insertWidget(0, empty_lbl)
+            self._render_empty_alerts_state()
             return
 
         for alert in alerts:
             card = self._create_alert_card(alert)
             self.alerts_list_layout.insertWidget(self.alerts_list_layout.count() - 1, card)
+            if self.active_alert_filter != "All" and getattr(alert, "category", "") != self.active_alert_filter:
+                card.hide()
 
     def _create_alert_card(self, alert: Any) -> SimpleCardWidget:
-        card = SimpleCardWidget()
-        cat = alert.category
-        color = "#dc2626" if cat == "CRITICAL" else ("#d97706" if cat == "WARNING" else ("#6366f1" if cat == "AI_INSIGHT" else "#2563eb"))
-        card.setStyleSheet(f"border-left: 5px solid {color}; background-color: #1e293b; border-radius: 6px;")
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(16, 12, 16, 12)
-        lay.setSpacing(6)
+        if isinstance(alert, dict):
+            aid = alert.get("alert_id") or alert.get("id", "")
+            cat = alert.get("category", "INFO")
+            title = alert.get("title", "")
+            msg = alert.get("message", "")
+            ts = alert.get("timestamp", "")
+            src = alert.get("source", "system")
+        else:
+            aid = alert.alert_id
+            cat = alert.category
+            title = alert.title
+            msg = alert.message
+            ts = alert.timestamp
+            src = getattr(alert, "source", "system")
 
+        card = SimpleCardWidget()
+        card.setProperty("alert_id", aid)
+        card.setProperty("category", cat)
+
+        if cat == "CRITICAL":
+            accent = "#ef4444"
+            badge_bg = "#7f1d1d"
+            badge_fg = "#fecaca"
+            icon = "⛔"
+        elif cat == "WARNING":
+            accent = "#f59e0b"
+            badge_bg = "#78350f"
+            badge_fg = "#fef3c7"
+            icon = "⚠️"
+        elif cat == "AI_INSIGHT":
+            accent = "#a855f7"
+            badge_bg = "#581c87"
+            badge_fg = "#f3e8ff"
+            icon = "🤖"
+        else:
+            accent = "#3b82f6"
+            badge_bg = "#1e3a8a"
+            badge_fg = "#dbeafe"
+            icon = "ℹ️"
+
+        card.setStyleSheet(f"""
+            SimpleCardWidget {{
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-left: 5px solid {accent};
+                border-radius: 6px;
+            }}
+            SimpleCardWidget:hover {{
+                border-color: #475569;
+                background-color: #243248;
+            }}
+        """)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(18, 12, 18, 12)
+        lay.setSpacing(8)
+
+        # Header: Icon + Category Badge + Title + Timestamp + Acknowledge Button
         hdr = QHBoxLayout()
-        title_lbl = QLabel(f"[{cat}] {alert.title}")
-        title_lbl.setStyleSheet(f"font-weight: 700; font-size: 10pt; color: {color};")
+        hdr.setSpacing(8)
+
+        lbl_badge = QLabel(f"{icon} {cat}")
+        lbl_badge.setStyleSheet(f"""
+            background-color: {badge_bg};
+            color: {badge_fg};
+            font-size: 8pt;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+        """)
+        hdr.addWidget(lbl_badge)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet("font-weight: 700; font-size: 10.5pt; color: #ffffff;")
         hdr.addWidget(title_lbl)
+
         hdr.addStretch()
 
-        time_lbl = QLabel(alert.timestamp[:19])
+        ts_str = ts[:19].replace("T", " ") if ts else ""
+        time_lbl = QLabel(f"🕒 {ts_str}  [{src}]")
         time_lbl.setStyleSheet("color: #94a3b8; font-size: 8.5pt;")
         hdr.addWidget(time_lbl)
 
-        btn_ack = PushButton("Acknowledge", card)
-        btn_ack.clicked.connect(lambda _, aid=alert.alert_id: self._ack_alert(aid))
+        btn_ack = PushButton("✓ Acknowledge", card)
+        btn_ack.setCursor(Qt.PointingHandCursor)
+        btn_ack.setStyleSheet("""
+            PushButton {
+                background-color: #0f172a;
+                color: #e2e8f0;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 8.5pt;
+                font-weight: 600;
+            }
+            PushButton:hover {
+                background-color: #059669;
+                color: #ffffff;
+                border-color: #10b981;
+            }
+        """)
+        btn_ack.clicked.connect(lambda _, a=aid: self._ack_alert(a))
         hdr.addWidget(btn_ack)
         lay.addLayout(hdr)
 
-        msg_lbl = QLabel(alert.message)
+        msg_lbl = QLabel(msg)
         msg_lbl.setWordWrap(True)
-        msg_lbl.setStyleSheet("color: #f1f5f9; font-size: 9.5pt;")
+        msg_lbl.setStyleSheet("color: #cbd5e1; font-size: 9.5pt; line-height: 1.4;")
         lay.addWidget(msg_lbl)
+
+        self.alert_cards_map[aid] = card
         return card
 
     def _filter_alerts(self, category_name: str):
-        alert_srv = self.services.get("alert_service")
-        if not alert_srv:
-            return
-        cat = None if category_name == "All" else category_name
-        alerts = alert_srv.get_alerts(category=cat, unacknowledged_only=True)
-
-        while self.alerts_list_layout.count() > 1:
-            item = self.alerts_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        for alert in alerts:
-            card = self._create_alert_card(alert)
-            self.alerts_list_layout.insertWidget(self.alerts_list_layout.count() - 1, card)
+        self.active_alert_filter = category_name
+        for aid, card in self.alert_cards_map.items():
+            card_cat = card.property("category")
+            if category_name == "All" or card_cat == category_name:
+                card.show()
+            else:
+                card.hide()
 
     def _ack_alert(self, alert_id: str):
         alert_srv = self.services.get("alert_service")
         if alert_srv:
             alert_srv.acknowledge(alert_id)
-            self.refresh_alerts_panel()
+            if not (self.alert_socket_worker and self.alert_socket_worker._sio and self.alert_socket_worker._sio.connected):
+                self._on_socket_alert_acknowledged(alert_id)
 
     def _ack_all_alerts(self):
         alert_srv = self.services.get("alert_service")
         if alert_srv:
-            alert_srv.acknowledge_all()
-            self.refresh_alerts_panel()
+            count = alert_srv.acknowledge_all()
+            if not (self.alert_socket_worker and self.alert_socket_worker._sio and self.alert_socket_worker._sio.connected):
+                self._on_socket_all_acknowledged(count)
+
+    def _test_alert_broadcast(self):
+        alert_srv = self.services.get("alert_service")
+        if not alert_srv:
+            return
+        import random
+        samples = [
+            ("CRITICAL", "High Active Energy Inrush", "Feeder 2 instantaneous load exceeded upper threshold by +24.6%."),
+            ("WARNING", "NBSense Email Ingestion Delayed", "Gmail inbox scan detected report email delayed by over 45 minutes."),
+            ("INFO", "Historical Ledger Verified", "Automated 30-day lookback confirmed zero gap in active energy readings."),
+            ("AI_INSIGHT", "Night Shift Efficiency Spike", "Machine Cell 3 idle baseload suggests potential 15% overnight power conservation."),
+        ]
+        cat, title, msg = random.choice(samples)
+        alert = alert_srv.raise_alert(category=cat, title=title, message=msg, source="live_socketio_test")
+        if not (self.alert_socket_worker and self.alert_socket_worker._sio and self.alert_socket_worker._sio.connected):
+            self._on_socket_alert_created(alert.to_dict())
 
     # =================================================================
     # Page 9: Processing History & Diagnostics
@@ -1567,6 +2029,87 @@ class Dashboard(FluentWindow):
         )
         layout.addWidget(st_guidance)
 
+        # Guidance Card: Google Gemini AI Intelligence & API Key (Dynamic Integration)
+        self.gemini_card = SimpleCardWidget(container)
+        gem_lay = QVBoxLayout(self.gemini_card)
+        gem_lay.setContentsMargins(18, 14, 18, 14)
+        gem_lay.setSpacing(10)
+
+        gem_hdr = QHBoxLayout()
+        gem_title = StrongBodyLabel("Google Gemini AI Intelligence & API Key")
+        gem_title.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 10pt;")
+        gem_hdr.addWidget(gem_title)
+        gem_hdr.addStretch()
+
+        gem_srv = self.services.get("gemini_service")
+        gem_configured = bool(gem_srv and getattr(gem_srv, "api_key", None))
+        self.gemini_status_badge = QLabel("✓ Configured & Active" if gem_configured else "• Offline Fallback (Deterministic Engine)")
+        self.gemini_status_badge.setStyleSheet(
+            f"font-weight: 700; color: {'#4ade80' if gem_configured else '#fbbf24'}; font-size: 9pt;"
+        )
+        gem_hdr.addWidget(self.gemini_status_badge)
+        gem_lay.addLayout(gem_hdr)
+
+        gem_desc = QLabel(
+            "Configure your Google Gemini API key to activate conversational energy analytics, "
+            "automated anomaly explanation, and executive shift insights. Operates in advisory mode only; "
+            "never alters Excel formulas or authoritative database records."
+        )
+        gem_desc.setWordWrap(True)
+        gem_desc.setStyleSheet("color: #cbd5e1; font-size: 9pt;")
+        gem_lay.addWidget(gem_desc)
+
+        # Input row: Key + Show/Hide + Test + Save
+        input_box = QHBoxLayout()
+        input_box.setSpacing(8)
+
+        lbl_key = QLabel("Gemini API Key:")
+        lbl_key.setStyleSheet("color: #f1f5f9; font-weight: 600; font-size: 9pt;")
+        input_box.addWidget(lbl_key)
+
+        current_key = getattr(gem_srv, "api_key", "") or os.getenv("GEMINI_API_KEY", "") or ""
+        self.in_gemini_api_key = QLineEdit(current_key, self.gemini_card)
+        self.in_gemini_api_key.setEchoMode(QLineEdit.Password)
+        self.in_gemini_api_key.setPlaceholderText("Enter AIzaSy... API key")
+        self.in_gemini_api_key.setMinimumWidth(320)
+        self.in_gemini_api_key.setStyleSheet("""
+            QLineEdit {
+                background-color: #0f172a;
+                color: #ffffff;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-family: Consolas, monospace;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+            }
+        """)
+        input_box.addWidget(self.in_gemini_api_key, 1)
+
+        self.btn_toggle_key = PushButton("👁 Show", self.gemini_card)
+        self.btn_toggle_key.setFixedWidth(75)
+        self.btn_toggle_key.clicked.connect(self._toggle_gemini_key_visibility)
+        input_box.addWidget(self.btn_toggle_key)
+
+        self.btn_test_gemini = PushButton("Test Connection", self.gemini_card)
+        self.btn_test_gemini.clicked.connect(self._test_gemini_connection)
+        input_box.addWidget(self.btn_test_gemini)
+
+        self.btn_save_gemini = PrimaryPushButton("Save & Apply", self.gemini_card)
+        self.btn_save_gemini.clicked.connect(self._save_gemini_key)
+        input_box.addWidget(self.btn_save_gemini)
+
+        gem_lay.addLayout(input_box)
+
+        # Model and status notes
+        model_name = getattr(gem_srv, "model", "gemini-2.5-flash") or "gemini-2.5-flash"
+        self.lbl_gemini_feedback = QLabel(f"Active Model: {model_name} • Changes apply dynamically at runtime without restart")
+        self.lbl_gemini_feedback.setStyleSheet("color: #94a3b8; font-size: 8.5pt;")
+        gem_lay.addWidget(self.lbl_gemini_feedback)
+
+        layout.addWidget(self.gemini_card)
+
         # Active Enterprise Configuration Parameters
         group_card = SimpleCardWidget(container)
         g_lay = QVBoxLayout(group_card)
@@ -1613,6 +2156,130 @@ class Dashboard(FluentWindow):
         layout.addWidget(group_card)
         scroll.setWidget(container)
         return scroll
+
+    def _toggle_gemini_key_visibility(self):
+        if not hasattr(self, "in_gemini_api_key"):
+            return
+        if self.in_gemini_api_key.echoMode() == QLineEdit.Password:
+            self.in_gemini_api_key.setEchoMode(QLineEdit.Normal)
+            self.btn_toggle_key.setText("🔒 Hide")
+        else:
+            self.in_gemini_api_key.setEchoMode(QLineEdit.Password)
+            self.btn_toggle_key.setText("👁 Show")
+
+    def _save_gemini_key(self):
+        if not hasattr(self, "in_gemini_api_key"):
+            return
+        key = self.in_gemini_api_key.text().strip()
+
+        # Update environment
+        if key:
+            os.environ["GEMINI_API_KEY"] = key
+        else:
+            os.environ.pop("GEMINI_API_KEY", None)
+
+        # Update settings.json
+        settings_path = Path("config/settings.json")
+        try:
+            cur_settings = {}
+            if settings_path.exists():
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    cur_settings = json.load(f)
+            if "gemini" not in cur_settings or not isinstance(cur_settings["gemini"], dict):
+                cur_settings["gemini"] = {}
+            cur_settings["gemini"]["api_key"] = key
+            cur_settings["gemini"]["enabled"] = True
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(cur_settings, f, indent=2)
+        except Exception as exc:
+            self._append_log(f"Warning: could not write settings.json: {exc}")
+
+        # Update running gemini service
+        gem = self.services.get("gemini_service")
+        if gem:
+            gem.api_key = key
+            gem.enabled = True
+
+        # Update badge
+        has_key = bool(key)
+        self.gemini_status_badge.setText("✓ Configured & Active" if has_key else "• Offline Fallback (Deterministic Engine)")
+        self.gemini_status_badge.setStyleSheet(
+            f"font-weight: 700; color: {'#4ade80' if has_key else '#fbbf24'}; font-size: 9pt;"
+        )
+        self.lbl_gemini_feedback.setText(
+            f"Active Model: {getattr(gem, 'model', 'gemini-2.5-flash')} • {'API Key configured & active.' if has_key else 'API Key cleared; offline fallback active.'}"
+        )
+
+        # Update AI panel banner if it exists
+        if hasattr(self, "_update_ai_panel_status_card"):
+            self._update_ai_panel_status_card()
+
+        # Refresh overall system health & readiness ribbon
+        self.refresh_status()
+
+        InfoBar.success(
+            title="AI Configuration Saved",
+            content="Google Gemini API key has been applied dynamically to the live system.",
+            orient=Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3500,
+            parent=self,
+        )
+        self._append_log(f"Google Gemini API key updated dynamically ({'Key Configured' if has_key else 'Key Cleared'}).")
+
+    def _test_gemini_connection(self):
+        if not hasattr(self, "in_gemini_api_key"):
+            return
+        key = self.in_gemini_api_key.text().strip()
+        if not key:
+            InfoBar.warning(
+                title="API Key Required",
+                content="Please enter an API key before testing connection.",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=3000,
+                parent=self,
+            )
+            return
+
+        gem = self.services.get("gemini_service")
+        old_key = getattr(gem, "api_key", None)
+        try:
+            if gem:
+                gem.api_key = key
+                res = gem.test_connection()
+            else:
+                from app.services.ai.gemini_service import GeminiService
+                temp_gem = GeminiService(api_key=key, enabled=True)
+                res = temp_gem.test_connection()
+
+            if res.get("success"):
+                InfoBar.success(
+                    title="Gemini Connection Successful",
+                    content=res.get("message", "Connected successfully!"),
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=4000,
+                    parent=self,
+                )
+                self.lbl_gemini_feedback.setText(f"✓ Verification Passed: {res.get('message')}")
+            else:
+                InfoBar.error(
+                    title="Gemini Connection Failed",
+                    content=res.get("message", "Could not reach Gemini endpoint."),
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=5000,
+                    parent=self,
+                )
+                self.lbl_gemini_feedback.setText(f"✖ Verification Failed: {res.get('message')}")
+        finally:
+            if gem and not self.in_gemini_api_key.text().strip() == getattr(gem, "api_key", ""):
+                gem.api_key = old_key
 
     def _create_requirement_card(
         self,

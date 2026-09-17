@@ -68,6 +68,75 @@ class GeminiService:
             "model": self.model,
         }
 
+    def test_connection(self) -> Dict[str, Any]:
+        """
+        Verify Gemini API connectivity with a lightweight ping.
+        Measures roundtrip latency and validates API key credentials.
+        """
+        if not self.api_key:
+            return {
+                "success": False,
+                "message": "API key is empty or not configured.",
+                "latency_ms": 0,
+            }
+
+        try:
+            import time
+            import requests
+
+            url = (
+                "https://generativelanguage.googleapis.com/"
+                "v1beta/models/"
+                f"{self.model}:generateContent"
+                f"?key={self.api_key}"
+            )
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": "Health check ping. Respond with 'OK'."
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "maxOutputTokens": 10,
+                },
+            }
+
+            t0 = time.perf_counter()
+            resp = requests.post(url, json=payload, timeout=12)
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "message": f"Successfully connected to Google Gemini ({self.model}) in {latency_ms}ms.",
+                    "latency_ms": latency_ms,
+                    "model": self.model,
+                }
+            else:
+                err_msg = f"HTTP {resp.status_code}"
+                try:
+                    err_json = resp.json()
+                    if "error" in err_json:
+                        err_msg = err_json["error"].get("message", err_msg)
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "message": f"Gemini API returned error: {err_msg}",
+                    "latency_ms": latency_ms,
+                }
+        except Exception as exc:
+            return {
+                "success": False,
+                "message": f"Connection failed: {str(exc)}",
+                "latency_ms": 0,
+            }
+
     # ------------------------------------------------------------------
     # Main analysis API
     # ------------------------------------------------------------------
