@@ -156,9 +156,13 @@ class ReconciliationService:
         available_dates: Optional[Iterable[Any]] = None,
         reference_date: Optional[Any] = None,
         days_back: Optional[int] = None,
+        existing_dates: Optional[Iterable[Any]] = None,
+        days: Optional[int] = None,
+        **kwargs,
     ) -> List[date]:
         """
         Return dates missing from the expected historical window.
+        Accepts both available_dates/existing_dates and days_back/days for API flexibility.
         """
 
         ref = (
@@ -166,17 +170,20 @@ class ReconciliationService:
             or date.today()
         )
 
+        effective_days = days_back if days_back is not None else days
         lookback = (
             self.expected_days_back
-            if days_back is None
-            else max(1, int(days_back))
+            if effective_days is None
+            else max(1, int(effective_days))
         )
+
+        effective_dates = available_dates if available_dates is not None else existing_dates
 
         available = {
             normalized
             for normalized in (
                 self._normalize_date(value)
-                for value in (available_dates or [])
+                for value in (effective_dates or [])
             )
             if normalized is not None
         }

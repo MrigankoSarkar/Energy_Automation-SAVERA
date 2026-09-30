@@ -15,8 +15,7 @@ from typing import Any, Dict, List, Optional
 import openpyxl
 import pandas as pd
 
-from streamlit_app.data_validator import WorkbookDataValidator, ParsedWorkbook
-from streamlit_app.analytics import EnergyAnalytics
+from services.data_service.provider import TelemetryDataProvider
 
 
 @dataclass
@@ -60,7 +59,7 @@ class DashboardDataService:
     def __init__(self, application: Any = None):
         self.application = application
         self.services = getattr(application, "services", {}) if application else {}
-        self.validator = WorkbookDataValidator()
+        self.provider = TelemetryDataProvider()
 
     def get_overview_data(self) -> DynamicOverviewData:
         """Collects verified metrics from both Excel (primary) and SQLite (audit)."""
@@ -85,34 +84,34 @@ class DashboardDataService:
         top_equipment: List[Dict[str, Any]] = []
         excel_has_data = False
 
-        if Path(wb_path).exists():
-            try:
-                parsed = self.validator.parse_workbook(wb_path)
-                if parsed.is_valid and not parsed.df_daily.empty:
-                    excel_has_data = True
-                    analytics = EnergyAnalytics(parsed)
-                    kpis = analytics.get_executive_kpis()
+        try:
+            prov = TelemetryDataProvider(excel_path=wb_path)
+            summary = prov.get_summary()
+            if summary.is_active:
+                excel_has_data = True
+                latest_date_str = summary.latest_date
+                latest_kwh = summary.latest_kwh
+                prev_date_str = summary.previous_date
+                prev_kwh = summary.previous_kwh
+                mtd_kwh = summary.mtd_kwh
+                dod_pct = summary.change_pct
+                if latest_kwh is not None and prev_kwh is not None:
+                    dod_kwh = round(latest_kwh - prev_kwh, 2)
+                active_meters = summary.active_meters_count
+                total_meters = summary.total_meters_count
 
-                    latest_date_str = kpis.latest_date.strftime("%d-%b-%Y") if kpis.latest_date else None
-                    latest_kwh = kpis.latest_total_kwh
-                    prev_date_str = kpis.previous_date.strftime("%d-%b-%Y") if kpis.previous_date else None
-                    prev_kwh = kpis.previous_total_kwh
-                    mtd_kwh = kpis.mtd_total_kwh
-                    dod_pct = kpis.dod_change_pct
-                    dod_kwh = kpis.dod_change_kwh
-                    active_meters = kpis.active_meters_count
-                    total_meters = kpis.total_meters_count
-
-                    rankings = analytics.get_meter_rankings(include_incomer=False)
-                    for _, row in rankings.head(5).iterrows():
-                        top_equipment.append({
-                            "meter_name": str(row["Meter"]),
-                            "active_energy": float(row["Total kWh"]),
-                            "share_pct": float(row["Share %"]),
-                            "status": "VALID",
-                        })
-            except Exception:
-                pass
+                feeders = prov.get_feeders_catalog()
+                valid_feeders = [f for f in feeders if f.get("latest_kwh") is not None]
+                valid_feeders.sort(key=lambda x: x["latest_kwh"], reverse=True)
+                for f in valid_feeders[:5]:
+                    top_equipment.append({
+                        "meter_name": f["feeder_name"],
+                        "active_energy": f["latest_kwh"],
+                        "share_pct": f.get("share_pct", 0.0),
+                        "status": "VALID",
+                    })
+        except Exception:
+            pass
 
         # 2. Secondary Source: SQLite Database Audit Trail
         repo = self.services.get("report_repository")
@@ -279,20 +278,20 @@ class DashboardDataService:
                 timestamp=now_str,
             )
 
-        # 6. Streamlit BI Health
-        st_app = Path("streamlit_app/app.py")
-        if st_app.exists():
-            results["Streamlit"] = ServiceHealth(
-                name="Streamlit BI",
+        # 6. Plotly Dash BI Health
+        dash_app = Path("services/dash_service/app.py")
+        if dash_app.exists():
+            results["Dash"] = ServiceHealth(
+                name="Plotly Dash BI",
                 status="ACTIVE",
-                details="Management analytics ready on port 8501",
+                details="Engineering & Business analytics ready on port 8050",
                 timestamp=now_str,
             )
         else:
-            results["Streamlit"] = ServiceHealth(
-                name="Streamlit BI",
+            results["Dash"] = ServiceHealth(
+                name="Plotly Dash BI",
                 status="NOT ACTIVE",
-                details="streamlit_app/app.py not installed",
+                details="services/dash_service/app.py not installed",
                 timestamp=now_str,
             )
 

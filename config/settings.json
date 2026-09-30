@@ -1,6 +1,6 @@
 {
-  "company": "Savera MS",
-  "plant": "Chennai Manufacturing Plant",
+  "company": "Savera Auto Comps Pvt Ltd",
+  "plant": "Pune Manufacturing Plant",
   "gmail": {
     "sender": "alerts@nbsense.com",
     "subject_contains": "Ems Monitoring Report",
@@ -10,7 +10,7 @@
     "expected_unit": "kWh"
   },
   "excel": {
-    "file": "Test_BI_Analysis_Report_2026.xlsx",
+    "file": "BI_Analysis_Report_2026.xlsx",
     "worksheet": "EMS Monitoring Report",
     "header_row": 3,
     "date_column": 2,
@@ -30,13 +30,13 @@
   },
   "gemini": {
     "enabled": true,
-    "model": "gemini-2.5-flash",
-    "api_key": ""
+    "model": "gemini-flash-latest",
+    "api_key": "AQ.Ab8RN6LmSXx6jV3FN6exP_15NbwGPsXydRvk2QoXMocmWKBp9g"
   },
-  "streamlit": {
+  "dash": {
     "enabled": true,
-    "cloud_url": "http://localhost:8501",
-    "cache_ttl_seconds": 300,
+    "url": "http://localhost:8050",
+    "port": 8050,
     "auto_launch_browser": true
   }
 }

@@ -636,7 +636,7 @@ def build_services(
 
     gemini_model = gemini_settings.get(
         "model",
-        "gemini-2.5-flash",
+        "gemini-flash-latest",
     )
 
     gemini_service = _construct(

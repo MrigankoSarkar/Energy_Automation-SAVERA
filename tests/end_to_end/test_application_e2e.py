@@ -35,42 +35,54 @@ def test_application_dashboard_wiring():
         assert hasattr(dash, "status_indicator")
         assert dash.windowTitle() == "EnergyAutomation — EMS Monitoring"
 
-        # Verify enterprise panels
-        assert hasattr(dash, "reports_table")
-        assert hasattr(dash, "top_meters_table")
+        # Verify modern enterprise panels (8 subinterfaces)
+        assert hasattr(dash, "page_overview")
+        assert hasattr(dash, "page_recovery")
+        assert hasattr(dash, "page_ai")
+        assert hasattr(dash, "page_dash")
+        assert hasattr(dash, "page_alerts")
+        assert hasattr(dash, "page_history")
+        assert hasattr(dash, "page_settings")
+        assert hasattr(dash, "page_help")
+
         assert hasattr(dash, "recovery_log")
-        assert hasattr(dash, "btn_launch_streamlit")
-        assert hasattr(dash, "btn_start_server")
+        assert hasattr(dash, "btn_launch_dash")
+        assert hasattr(dash, "btn_start_dash_server")
         assert hasattr(dash, "ai_query_input")
         assert hasattr(dash, "ai_response_display")
         assert dash.notification_service is not None
         assert dash.data_service is not None
 
         # Exercise panel interactions
-        dash.refresh_reports_table()
-        dash.refresh_analysis()
         dash.scan_missing_dates()
-        assert "scanning" in dash.recovery_log.toPlainText().lower()
+        assert "scanning" in dash.recovery_log.toPlainText().lower() or "audit" in dash.recovery_log.toPlainText().lower()
 
-        dash.refresh_streamlit_panel()
         dash._set_and_ask_ai("What is the total energy consumed?")
         assert len(dash.ai_response_display.toPlainText()) > 0
 
-        # Exercise sidebar navigation across all 12 views
-        for page_idx in range(12):
-            dash.switch_page(page_idx)
-            assert dash.stack.currentIndex() == page_idx
+        # Exercise navigation across modern subinterfaces
+        for page in [
+            dash.page_overview,
+            dash.page_recovery,
+            dash.page_ai,
+            dash.page_dash,
+            dash.page_alerts,
+            dash.page_history,
+            dash.page_settings,
+            dash.page_help,
+        ]:
+            dash.switchTo(page)
+            assert dash.stackedWidget.currentWidget() == page
 
         # Exercise Global Search
-        dash.handle_global_search("Powder Coating")
-        assert dash.stack.currentIndex() == 2  # Meter Analysis page
+        dash.handle_global_search("recovery")
+        assert dash.stackedWidget.currentWidget() == dash.page_recovery
 
         dash.handle_global_search("alert")
-        assert dash.stack.currentIndex() == 8  # Alert Center page
+        assert dash.stackedWidget.currentWidget() == dash.page_alerts
 
-        # Exercise Plant Map Widget
-        assert hasattr(dash, "plant_map_widget")
-        dash.refresh_plant_topology_view()
+        dash.handle_global_search("dash")
+        assert dash.stackedWidget.currentWidget() == dash.page_dash
 
         # Exercise Dialogs
         from ui.dialogs.guided_tour import GuidedTourDialog

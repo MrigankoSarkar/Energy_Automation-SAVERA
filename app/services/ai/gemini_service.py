@@ -28,6 +28,14 @@ class GeminiService:
     """
 
     DEFAULT_MODEL = "gemini-2.5-flash"
+    FALLBACK_MODELS = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemini-3.8-flash",
+    ]
 
     def __init__(
         self,
@@ -70,66 +78,111 @@ class GeminiService:
 
     def test_connection(self) -> Dict[str, Any]:
         """
-        Verify Gemini API connectivity with a lightweight ping.
+        Verify Gemini API connectivity with a lightweight ping using official google-genai SDK
+        and multi-model failover, with graceful fallback to REST.
         Measures roundtrip latency and validates API key credentials.
         """
         if not self.api_key:
             return {
                 "success": False,
-                "message": "API key is empty or not configured.",
+                "message": "API key is empty or not configured. Please enter your Gemini API key in Settings.",
                 "latency_ms": 0,
             }
 
+        import time
+
+        candidate_models = [self.model]
+        for fb in self.FALLBACK_MODELS:
+            if fb not in candidate_models:
+                candidate_models.append(fb)
+
+        # 1. Primary: Official google-genai SDK
         try:
-            import time
+            from google import genai
+
+            client = genai.Client(api_key=self.api_key)
+            for candidate in candidate_models:
+                try:
+                    t0 = time.perf_counter()
+                    response = client.models.generate_content(
+                        model=candidate,
+                        contents="Health check ping. Respond with 'OK'.",
+                    )
+                    latency_ms = int((time.perf_counter() - t0) * 1000)
+                    if response and hasattr(response, "text") and response.text:
+                        self.model = candidate
+                        return {
+                            "success": True,
+                            "message": f"Successfully connected via official google-genai SDK ({candidate}) in {latency_ms}ms.",
+                            "latency_ms": latency_ms,
+                            "model": candidate,
+                            "sdk": "google-genai",
+                        }
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # 2. Fallback: Direct REST endpoint
+        try:
             import requests
 
-            url = (
-                "https://generativelanguage.googleapis.com/"
-                "v1beta/models/"
-                f"{self.model}:generateContent"
-                f"?key={self.api_key}"
-            )
-            payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {
-                                "text": "Health check ping. Respond with 'OK'."
-                            }
-                        ]
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": 0.0,
-                    "maxOutputTokens": 10,
-                },
-            }
-
-            t0 = time.perf_counter()
-            resp = requests.post(url, json=payload, timeout=12)
-            latency_ms = int((time.perf_counter() - t0) * 1000)
-
-            if resp.status_code == 200:
-                return {
-                    "success": True,
-                    "message": f"Successfully connected to Google Gemini ({self.model}) in {latency_ms}ms.",
-                    "latency_ms": latency_ms,
-                    "model": self.model,
+            last_err = ""
+            for candidate in candidate_models:
+                url = (
+                    "https://generativelanguage.googleapis.com/"
+                    "v1beta/models/"
+                    f"{candidate}:generateContent"
+                    f"?key={self.api_key}"
+                )
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "text": "Health check ping. Respond with 'OK'."
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.0,
+                        "maxOutputTokens": 10,
+                    },
                 }
-            else:
-                err_msg = f"HTTP {resp.status_code}"
+
+                t0 = time.perf_counter()
                 try:
-                    err_json = resp.json()
-                    if "error" in err_json:
-                        err_msg = err_json["error"].get("message", err_msg)
-                except Exception:
-                    pass
-                return {
-                    "success": False,
-                    "message": f"Gemini API returned error: {err_msg}",
-                    "latency_ms": latency_ms,
-                }
+                    resp = requests.post(url, json=payload, timeout=12)
+                    latency_ms = int((time.perf_counter() - t0) * 1000)
+
+                    if resp.status_code == 200:
+                        self.model = candidate
+                        return {
+                            "success": True,
+                            "message": f"Successfully connected to Google Gemini ({candidate}) in {latency_ms}ms.",
+                            "latency_ms": latency_ms,
+                            "model": candidate,
+                            "sdk": "rest",
+                        }
+                    else:
+                        err_msg = f"HTTP {resp.status_code}"
+                        try:
+                            err_json = resp.json()
+                            if "error" in err_json:
+                                err_msg = err_json["error"].get("message", err_msg)
+                        except Exception:
+                            pass
+                        last_err = f"{candidate}: {err_msg}"
+                except Exception as ex:
+                    last_err = f"{candidate}: {ex}"
+
+            return {
+                "success": False,
+                "message": f"Gemini API returned error: {last_err}",
+                "latency_ms": 0,
+                "model": self.model,
+            }
         except Exception as exc:
             return {
                 "success": False,
@@ -281,13 +334,54 @@ class GeminiService:
                 "status": "empty_question",
             }
 
-        ctx = context_data or {}
+        ctx = dict(context_data or {})
         if not ctx:
             return {
                 "success": True,
-                "answer": "Insufficient data available.",
+                "answer": (
+                    "Insufficient data available.\n\n"
+                    "💡 **How to guide and use the AI Insights system:**\n"
+                    "• **Select File**: Ensure a valid Excel workbook is configured in Settings or Overview.\n"
+                    "• **Run Automation**: Click '⚡ Run Automation Now' to pull the latest verified meter readings.\n"
+                    "• **Configure API**: Check your Gemini API key in Settings → Advisory AI.\n\n"
+                    "**Suggested Prompts to Ask:**\n"
+                    "1. *What is the total energy consumption yesterday?*\n"
+                    "2. *Which meters consumed the most energy?*\n"
+                    "3. *Are there any missing report dates in the last 30 days?*\n"
+                    "4. *Check for anomalies, zero readings, or negative values.*"
+                ),
                 "status": "insufficient_data",
+                "suggestions": [
+                    "What is the total energy consumption yesterday?",
+                    "Which meters consumed the most energy?",
+                    "Are there any missing report dates?",
+                    "Check for anomalies across all meters",
+                ],
             }
+
+        # Enrich context fields if nested in latest_report/readings
+        if "latest_report" in ctx and isinstance(ctx["latest_report"], dict):
+            lr = ctx["latest_report"]
+            if "total_energy" not in ctx and "total_energy" in lr:
+                ctx["total_energy"] = lr["total_energy"]
+            if "total" not in ctx and "total_energy" in lr:
+                ctx["total"] = lr["total_energy"]
+            if "report_date" not in ctx and "report_date" in lr:
+                ctx["report_date"] = lr["report_date"]
+
+        if "readings" in ctx and isinstance(ctx["readings"], list):
+            if "meters" not in ctx:
+                ctx["meters"] = ctx["readings"]
+            if "top_meters" not in ctx:
+                valid_m = [
+                    m for m in ctx["readings"]
+                    if isinstance(m, dict) and (m.get("value") is not None or m.get("active_energy") is not None)
+                ]
+                ctx["top_meters"] = sorted(
+                    valid_m,
+                    key=lambda x: float(x.get("value") if x.get("value") is not None else x.get("active_energy", 0)),
+                    reverse=True,
+                )
 
         if not self.enabled or not self.api_key:
             return self._deterministic_fallback_qa(question, ctx)
@@ -299,8 +393,13 @@ class GeminiService:
                 "success": True,
                 "status": "completed",
                 "answer": answer,
+                "model": self.model,
             }
         except Exception as exc:
+            fb = self._deterministic_fallback_qa(question, ctx)
+            if fb.get("status") != "insufficient_data":
+                fb["note"] = f"Cloud AI unavailable ({exc}); served via verified deterministic engine."
+                return fb
             return {
                 "success": False,
                 "status": "error",
@@ -365,7 +464,20 @@ class GeminiService:
         return {
             "success": True,
             "status": "insufficient_data",
-            "answer": "Insufficient data available.",
+            "answer": (
+                "Insufficient data available.\n\n"
+                "💡 **Organized Suggestions to Guide Your Analysis:**\n"
+                "• Ask about consumption: *'What was total energy consumption yesterday?'*\n"
+                "• Ask about high loads: *'Which meter consumed the most energy?'*\n"
+                "• Check data completeness: *'Are there any missing dates or gaps?'*\n"
+                "• Anomaly detection: *'Run local anomaly check on all meters.'*"
+            ),
+            "suggestions": [
+                "What is the total energy consumption yesterday?",
+                "Which meter consumed the most energy?",
+                "Are there any missing dates?",
+                "Show anomaly check results",
+            ],
         }
 
     def local_anomaly_check(
@@ -452,49 +564,95 @@ class GeminiService:
         self,
         prompt: str,
     ) -> str:
+        """
+        Generate content using the official google-genai SDK, with automatic REST fallback
+        and multi-model failover.
+        """
+        if not self.api_key:
+            raise RuntimeError("Gemini API key is not configured.")
 
+        candidate_models = [self.model]
+        for fb in self.FALLBACK_MODELS:
+            if fb not in candidate_models:
+                candidate_models.append(fb)
+
+        # 1. Primary: Official google-genai SDK
+        sdk_errors = []
+        try:
+            from google import genai
+
+            client = genai.Client(api_key=self.api_key)
+            for candidate in candidate_models:
+                try:
+                    response = client.models.generate_content(
+                        model=candidate,
+                        contents=prompt,
+                    )
+                    if response and hasattr(response, "text") and response.text:
+                        self.model = candidate
+                        return response.text.strip()
+                except Exception as ex:
+                    sdk_errors.append(f"{candidate}: {ex}")
+        except Exception as e:
+            sdk_errors.append(f"SDK init: {e}")
+
+        # 2. Fallback: Direct REST endpoint
         try:
             import requests
         except ImportError as exc:
             raise RuntimeError(
-                "The 'requests' package is required "
-                "for Gemini integration."
+                "The 'requests' package is required for Gemini integration."
             ) from exc
 
-        url = (
-            "https://generativelanguage.googleapis.com/"
-            "v1beta/models/"
-            f"{self.model}:generateContent"
-            f"?key={self.api_key}"
-        )
+        last_error = None
+        for candidate in candidate_models:
+            url = (
+                "https://generativelanguage.googleapis.com/"
+                "v1beta/models/"
+                f"{candidate}:generateContent"
+                f"?key={self.api_key}"
+            )
 
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": prompt
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.2,
-            },
-        }
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.2,
+                },
+            }
 
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=self.timeout,
-        )
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                if response.status_code == 200:
+                    self.model = candidate
+                    body = response.json()
+                    return self._extract_text(body)
+                else:
+                    err_msg = f"HTTP {response.status_code}"
+                    try:
+                        err_json = response.json()
+                        if "error" in err_json:
+                            err_msg = err_json["error"].get("message", err_msg)
+                    except Exception:
+                        pass
+                    last_error = f"{candidate}: {err_msg}"
+            except Exception as exc:
+                last_error = f"{candidate}: {exc}"
 
-        response.raise_for_status()
-
-        body = response.json()
-
-        return self._extract_text(
-            body
+        raise RuntimeError(
+            f"All Gemini models failed across google-genai SDK and REST. "
+            f"SDK: {'; '.join(sdk_errors[-2:]) if sdk_errors else 'N/A'} | REST: {last_error}"
         )
 
     # ------------------------------------------------------------------

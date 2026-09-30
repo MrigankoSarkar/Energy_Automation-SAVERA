@@ -1,18 +1,23 @@
 """
 Enterprise First-Run Setup Wizard for EnergyAutomation.
 Guides administrators and plant engineers through initial configuration,
-validation, and live connection diagnostics.
+validation, and live real-time connection diagnostics.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import socket
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QFileDialog,
@@ -110,7 +115,7 @@ class FluentNumberBox(QWidget):
         self.btn_inc.setCursor(Qt.PointingHandCursor)
         self.btn_inc.setStyleSheet("""
             QPushButton {
-                font-size: 14pt;
+                font-size: 15pt;
                 font-weight: 700;
                 background-color: #f1f5f9;
                 color: #0f172a;
@@ -129,23 +134,20 @@ class FluentNumberBox(QWidget):
         lay.addWidget(self.btn_inc)
 
         if self._suffix:
-            lbl_sfx = QLabel(self._suffix, self)
-            lbl_sfx.setStyleSheet("color: #64748b; font-size: 9.5pt; font-weight: 500; margin-left: 4px;")
-            lay.addWidget(lbl_sfx)
+            lbl_suffix = QLabel(self._suffix, self)
+            lbl_suffix.setStyleSheet("color: #64748b; font-size: 9pt; font-weight: 600; margin-left: 4px;")
+            lay.addWidget(lbl_suffix)
 
         lay.addStretch()
 
     def value(self) -> int:
         return self._val
 
-    def setValue(self, val: int):
-        self._val = max(self._min, min(self._max, val))
-        self.in_val.setText(str(self._val))
-
-    def setRange(self, min_val: int, max_val: int):
-        self._min = min_val
-        self._max = max_val
-        self.setValue(self._val)
+    def setValue(self, v: int):
+        new_val = max(self._min, min(self._max, int(v)))
+        if new_val != self._val or self.in_val.text() != str(new_val):
+            self._val = new_val
+            self.in_val.setText(str(self._val))
 
     def _increase(self):
         self.setValue(self._val + self._step)
@@ -171,7 +173,7 @@ class SetupWizardDialog(QDialog):
     def __init__(self, parent: QWidget | None = None, config_path: str = "config/settings.json"):
         super().__init__(parent)
         self.setWindowTitle("EnergyAutomation — Initial Setup Wizard")
-        self.resize(740, 520)
+        self.resize(760, 560)
         self.config_path = Path(config_path)
         self.current_step = 0
         self.total_steps = 8
@@ -235,7 +237,7 @@ class SetupWizardDialog(QDialog):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(16)
 
-        # Header with Logo & Title
+        # Header with Logo, Title, and Persistent Back button
         header = QHBoxLayout()
         logo_label = QLabel()
         logo_path = Path("assets/savera-logo.jpg")
@@ -254,9 +256,9 @@ class SetupWizardDialog(QDialog):
         header.addLayout(title_box)
         header.addStretch()
 
-        self.btn_header_back = TransparentPushButton("← Back to Dashboard", self)
+        self.btn_header_back = TransparentPushButton("← Back", self)
         self.btn_header_back.setCursor(Qt.PointingHandCursor)
-        self.btn_header_back.clicked.connect(self.reject)
+        self.btn_header_back.clicked.connect(self._go_back)
         header.addWidget(self.btn_header_back)
 
         root.addLayout(header)
@@ -267,7 +269,7 @@ class SetupWizardDialog(QDialog):
         self.pages.addWidget(self._create_step2_excel())
         self.pages.addWidget(self._create_step3_gmail())
         self.pages.addWidget(self._create_step4_gemini())
-        self.pages.addWidget(self._create_step5_streamlit())
+        self.pages.addWidget(self._create_step5_dash())
         self.pages.addWidget(self._create_step6_scheduler())
         self.pages.addWidget(self._create_step7_testing())
         self.pages.addWidget(self._create_step8_complete())
@@ -275,7 +277,7 @@ class SetupWizardDialog(QDialog):
 
         # Bottom navigation
         nav = QHBoxLayout()
-        self.btn_back = PushButton("← Back to Dashboard", self)
+        self.btn_back = PushButton("← Back", self)
         self.btn_back.clicked.connect(self._go_back)
         self.btn_back.setEnabled(True)
         nav.addWidget(self.btn_back)
@@ -304,7 +306,7 @@ class SetupWizardDialog(QDialog):
         info = QLabel(
             "EnergyAutomation automates the daily ingestion of NBSense Energy Management System (EMS) "
             "PDF reports from Gmail, validates meter telemetry, updates existing Excel workbooks with "
-            "complete formula safety, and synchronizes executive analytics."
+            "complete formula safety, and synchronizes executive analytics via Plotly Dash BI."
         )
         info.setWordWrap(True)
         info.setStyleSheet("line-height: 1.4; color: #334155;")
@@ -352,9 +354,13 @@ class SetupWizardDialog(QDialog):
         return w
 
     def _browse_excel(self):
-        fpath, _ = QFileDialog.getOpenFileName(self, "Select Excel Workbook", "", "Excel Workbooks (*.xlsx *.xlsm)")
+        fpath, _ = QFileDialog.getOpenFileName(self, "Select Excel Workbook", str(Path.cwd()), "Excel Workbooks (*.xlsx *.xlsm)")
         if fpath:
-            self.in_excel_file.setText(fpath)
+            p = Path(fpath)
+            if p.exists():
+                self.in_excel_file.setText(fpath)
+            else:
+                QMessageBox.warning(self, "File Not Found", "Selected file does not exist. Choose the correct file and file path, otherwise not found or not connected.")
 
     def _create_step3_gmail(self) -> QWidget:
         w = QWidget()
@@ -373,17 +379,17 @@ class SetupWizardDialog(QDialog):
         self.in_gmail_days = FluentNumberBox(
             min_val=1, max_val=90, default_val=cfg_gmail.get("search_days", 30), suffix="Days"
         )
-        form.addRow("Historical Gap Lookback:", self.in_gmail_days)
+        form.addRow("Gap Healing Lookback Window:", self.in_gmail_days)
 
         lay.addLayout(form)
 
-        notice = QLabel(
-            "OAuth Authentication: Place `credentials.json` in `credentials/gmail/` to authorize the app. "
-            "Once authorized, token is refreshed automatically without human intervention."
+        auth_note = QLabel(
+            "🔑 Authentication Notice: Gmail access requires `credentials.json` (OAuth 2.0 Client ID) "
+            "placed inside `credentials/gmail/`. The desktop browser will prompt for one-time Google consent."
         )
-        notice.setWordWrap(True)
-        notice.setStyleSheet("background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 10px; color: #1e40af;")
-        lay.addWidget(notice)
+        auth_note.setWordWrap(True)
+        auth_note.setStyleSheet("background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; color: #92400e;")
+        lay.addWidget(auth_note)
         lay.addStretch()
         return w
 
@@ -392,60 +398,57 @@ class SetupWizardDialog(QDialog):
         lay = QVBoxLayout(w)
         lay.setSpacing(10)
 
-        cfg_gemini = self.settings.get("gemini", {})
-        self.cb_gemini_enabled = QCheckBox("Enable Google Gemini AI Intelligence")
-        self.cb_gemini_enabled.setChecked(cfg_gemini.get("enabled", True))
+        cfg_gem = self.settings.get("gemini", {})
+        self.cb_gemini_enabled = QCheckBox("Enable Google Gemini AI Advisory Layer")
+        self.cb_gemini_enabled.setChecked(cfg_gem.get("enabled", True))
         lay.addWidget(self.cb_gemini_enabled)
 
         form = QFormLayout()
-        self.in_gemini_model = QLineEdit(cfg_gemini.get("model", "gemini-2.5-flash"))
-        form.addRow("AI Model Name:", self.in_gemini_model)
+        self.in_gemini_model = QLineEdit(cfg_gem.get("model", "gemini-flash-latest"))
+        form.addRow("Gemini Primary Model:", self.in_gemini_model)
 
-        self.in_gemini_key = QLineEdit(cfg_gemini.get("api_key", ""))
+        self.in_gemini_key = QLineEdit(cfg_gem.get("api_key", ""))
         self.in_gemini_key.setEchoMode(QLineEdit.Password)
-        self.in_gemini_key.setPlaceholderText("Optional: Leave blank to use offline deterministic fallback")
+        self.in_gemini_key.setPlaceholderText("Paste your Gemini API key (AQ... or AIzaSy...)")
         form.addRow("Gemini API Key:", self.in_gemini_key)
+
         lay.addLayout(form)
 
-        policy = QLabel(
-            "🔒 Architecture Rule: Gemini AI operates strictly in advisory mode. It provides explanations, "
-            "summaries, and natural-language Q&A based on verified data, but never directly modifies Excel or bypasses validation."
+        ai_rule = QLabel(
+            "🛡 Zero Hallucination Rule: Google Gemini operates strictly read-only for natural-language Q&A "
+            "and observations. If no API key is provided, the platform automatically activates deterministic "
+            "offline rule reasoning so operations are never interrupted."
         )
-        policy.setWordWrap(True)
-        policy.setStyleSheet("background: #fdf4ff; border: 1px solid #f0abfc; border-radius: 6px; padding: 10px; color: #86198f;")
-        lay.addWidget(policy)
+        ai_rule.setWordWrap(True)
+        ai_rule.setStyleSheet("background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; color: #334155;")
+        lay.addWidget(ai_rule)
         lay.addStretch()
         return w
 
-    def _create_step5_streamlit(self) -> QWidget:
+    def _create_step5_dash(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setSpacing(10)
 
-        cfg_st = self.settings.get("streamlit", {})
-        self.cb_st_enabled = QCheckBox("Enable Streamlit Management BI Web Analytics")
-        self.cb_st_enabled.setChecked(cfg_st.get("enabled", True))
-        lay.addWidget(self.cb_st_enabled)
+        cfg_dash = self.settings.get("dash", {})
+        self.cb_dash_enabled = QCheckBox("Enable Plotly Dash Management & Engineering BI Microservice")
+        self.cb_dash_enabled.setChecked(cfg_dash.get("enabled", True))
+        lay.addWidget(self.cb_dash_enabled)
 
         form = QFormLayout()
-        self.in_st_url = QLineEdit(cfg_st.get("cloud_url", "http://localhost:8501"))
-        self.in_st_url.setPlaceholderText("e.g. http://localhost:8501 or Streamlit Community Cloud URL")
-        form.addRow("Streamlit Dashboard URL:", self.in_st_url)
+        self.in_dash_url = QLineEdit(cfg_dash.get("url", "http://localhost:8050"))
+        self.in_dash_url.setPlaceholderText("e.g. http://localhost:8050")
+        form.addRow("Plotly Dash BI URL:", self.in_dash_url)
 
-        self.in_st_cache_ttl = FluentNumberBox(
-            min_val=10, max_val=3600, default_val=cfg_st.get("cache_ttl_seconds", 300), step=30, suffix="Seconds"
-        )
-        form.addRow("Data Cache TTL:", self.in_st_cache_ttl)
-
-        self.cb_st_auto_launch = QCheckBox("Automatically launch browser when Streamlit server starts")
-        self.cb_st_auto_launch.setChecked(cfg_st.get("auto_launch_browser", True))
+        self.cb_dash_auto_launch = QCheckBox("Automatically launch browser when Dash server starts")
+        self.cb_dash_auto_launch.setChecked(cfg_dash.get("auto_launch_browser", True))
         lay.addLayout(form)
-        lay.addWidget(self.cb_st_auto_launch)
+        lay.addWidget(self.cb_dash_auto_launch)
 
         notice = QLabel(
-            "📊 Architecture Rule: Streamlit BI operates strictly read-only against your synchronized "
-            "production Excel workbook or SQLite database. It provides real-time browser analytics, executive "
-            "KPI gauges, load curves, and shift breakdowns from any browser or mobile device without risking Excel formula corruption."
+            "📊 Architecture Rule: Plotly Dash BI operates strictly read-only against your verified "
+            "production Excel workbook and Data Microservice API (port 8002). It provides real-time "
+            "executive KPI cards, shift trends, and engineering load comparison tables from any browser."
         )
         notice.setWordWrap(True)
         notice.setStyleSheet("background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 10px; color: #1e40af;")
@@ -483,77 +486,225 @@ class SetupWizardDialog(QDialog):
         lay = QVBoxLayout(w)
         lay.setSpacing(12)
 
-        lay.addWidget(QLabel("Live Diagnostics & Connection Verification:"))
+        # Header with Unified Test Button
+        top_bar = QHBoxLayout()
+        lbl_hdr = QLabel("Live Diagnostics & Real-Time Connection Verification:")
+        lbl_hdr.setStyleSheet("font-weight: 700; font-size: 10.5pt; color: #0f172a;")
+        top_bar.addWidget(lbl_hdr)
+        top_bar.addStretch()
 
-        box = QGroupBox("System Connection Checks")
+        self.btn_run_diagnostics = PrimaryPushButton("⚡ Run Real-Time Diagnostics & Connection Checks", w)
+        self.btn_run_diagnostics.clicked.connect(self._run_all_diagnostics)
+        top_bar.addWidget(self.btn_run_diagnostics)
+        lay.addLayout(top_bar)
+
+        self.lbl_diag_status = QLabel("Click the button above to run real-time tests across all subsystems.")
+        self.lbl_diag_status.setStyleSheet("color: #64748b; font-size: 9pt;")
+        lay.addWidget(self.lbl_diag_status)
+
+        box = QGroupBox("Subsystem Real-Time Health Matrix")
         b_lay = QVBoxLayout(box)
+        b_lay.setSpacing(10)
 
-        self.lbl_t_excel = QLabel("Excel Workbook: Click Test to check")
-        btn_t_excel = QPushButton("Test Excel")
+        # 1. Excel Workbook Test
+        self.lbl_t_excel = QLabel("Excel Workbook: Ready to test")
+        btn_t_excel = PushButton("Test Excel")
         btn_t_excel.clicked.connect(self._test_excel_connection)
         row_e = QHBoxLayout()
-        row_e.addWidget(self.lbl_t_excel)
-        row_e.addStretch()
+        row_e.addWidget(self.lbl_t_excel, 1)
         row_e.addWidget(btn_t_excel)
         b_lay.addLayout(row_e)
 
-        self.lbl_t_gmail = QLabel("Gmail Service: Click Test to check")
-        btn_t_gmail = QPushButton("Test Gmail")
+        # 2. SQLite Database Test
+        self.lbl_t_db = QLabel("SQLite Audit Database: Ready to test")
+        btn_t_db = PushButton("Test Database")
+        btn_t_db.clicked.connect(self._test_db_connection)
+        row_db = QHBoxLayout()
+        row_db.addWidget(self.lbl_t_db, 1)
+        row_db.addWidget(btn_t_db)
+        b_lay.addLayout(row_db)
+
+        # 3. Gmail Service Test
+        self.lbl_t_gmail = QLabel("Gmail Service: Ready to test")
+        btn_t_gmail = PushButton("Test Gmail")
         btn_t_gmail.clicked.connect(self._test_gmail_connection)
         row_g = QHBoxLayout()
-        row_g.addWidget(self.lbl_t_gmail)
-        row_g.addStretch()
+        row_g.addWidget(self.lbl_t_gmail, 1)
         row_g.addWidget(btn_t_gmail)
         b_lay.addLayout(row_g)
 
-        self.lbl_t_ai = QLabel("Gemini AI: Click Test to check")
-        btn_t_ai = QPushButton("Test AI")
+        # 4. Google Gemini AI Live Ping
+        self.lbl_t_ai = QLabel("Google Gemini AI: Ready to test")
+        btn_t_ai = PushButton("Test Gemini AI")
         btn_t_ai.clicked.connect(self._test_ai_connection)
         row_a = QHBoxLayout()
-        row_a.addWidget(self.lbl_t_ai)
-        row_a.addStretch()
+        row_a.addWidget(self.lbl_t_ai, 1)
         row_a.addWidget(btn_t_ai)
         b_lay.addLayout(row_a)
+
+        # 5. Plotly Dash BI Microservice Test
+        self.lbl_t_dash = QLabel("Plotly Dash BI: Ready to test")
+        btn_t_dash = PushButton("Test Dash BI")
+        btn_t_dash.clicked.connect(self._test_dash_connection)
+        row_d = QHBoxLayout()
+        row_d.addWidget(self.lbl_t_dash, 1)
+        row_d.addWidget(btn_t_dash)
+        b_lay.addLayout(row_d)
 
         lay.addWidget(box)
         lay.addStretch()
         return w
 
-    def _test_excel_connection(self):
+    def _test_excel_connection(self) -> bool:
+        start_t = time.time()
         target = self.in_excel_file.text().strip().strip('"\'')
+        sheet_target = self.in_excel_sheet.text().strip()
         p = Path(target)
-        if p.exists():
-            self.lbl_t_excel.setText(f"✔ Excel Workbook Found ({p.name})")
-            self.lbl_t_excel.setStyleSheet("color: #16a34a; font-weight: 700;")
-        else:
-            self.lbl_t_excel.setText("⚠ File does not exist yet (Will be created on first report)")
-            self.lbl_t_excel.setStyleSheet("color: #d97706; font-weight: 700;")
+        if not p.exists():
+            self.lbl_t_excel.setText(f"✖ File Not Found: '{target}'. Choose the correct file and file path, otherwise not connected.")
+            self.lbl_t_excel.setStyleSheet("color: #dc2626; font-weight: 700;")
+            return False
 
-    def _test_gmail_connection(self):
-        creds = Path("credentials/gmail/credentials.json")
-        tok = Path("credentials/token.json")
-        if tok.exists():
-            self.lbl_t_gmail.setText("✔ Gmail Token Configured & Ready")
-            self.lbl_t_gmail.setStyleSheet("color: #16a34a; font-weight: 700;")
-        elif creds.exists():
-            self.lbl_t_gmail.setText("✔ OAuth credentials.json present")
-            self.lbl_t_gmail.setStyleSheet("color: #16a34a; font-weight: 700;")
-        else:
-            self.lbl_t_gmail.setText("⚠ Gmail credentials missing (Mock/Manual mode active)")
-            self.lbl_t_gmail.setStyleSheet("color: #d97706; font-weight: 700;")
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(str(p), read_only=True, data_only=True)
+            elapsed_ms = int((time.time() - start_t) * 1000)
+            sheet_names = wb.sheetnames
+            has_sheet = sheet_target in sheet_names if sheet_target else True
+            active_sheet = sheet_target if has_sheet else sheet_names[0]
+            ws = wb[active_sheet]
+            max_r = ws.max_row or 0
+            wb.close()
 
-    def _test_ai_connection(self):
-        if self.cb_gemini_enabled.isChecked():
-            key = self.in_gemini_key.text().strip()
-            if key:
-                self.lbl_t_ai.setText("✔ Gemini API Key Provided")
-                self.lbl_t_ai.setStyleSheet("color: #16a34a; font-weight: 700;")
+            if has_sheet:
+                self.lbl_t_excel.setText(f"✔ Excel Verified: '{p.name}' | Sheet: '{active_sheet}' ({max_r} rows) [{elapsed_ms}ms]")
+                self.lbl_t_excel.setStyleSheet("color: #16a34a; font-weight: 700;")
+                return True
             else:
-                self.lbl_t_ai.setText("✔ Deterministic Fallback Mode Active")
-                self.lbl_t_ai.setStyleSheet("color: #2563eb; font-weight: 700;")
+                self.lbl_t_excel.setText(f"⚠ Sheet '{sheet_target}' not found. Available sheets: {', '.join(sheet_names[:3])} [{elapsed_ms}ms]")
+                self.lbl_t_excel.setStyleSheet("color: #d97706; font-weight: 700;")
+                return True
+        except Exception as exc:
+            self.lbl_t_excel.setText(f"✖ Excel Read Error: {exc}")
+            self.lbl_t_excel.setStyleSheet("color: #dc2626; font-weight: 700;")
+            return False
+
+    def _test_db_connection(self) -> bool:
+        start_t = time.time()
+        db_path = Path("data/automation.db")
+        if not db_path.exists():
+            db_path = Path("automation.db")
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [r[0] for r in cur.fetchall()]
+            report_cnt = 0
+            if "reports" in tables:
+                cur.execute("SELECT count(*) FROM reports")
+                report_cnt = cur.fetchone()[0]
+            conn.close()
+            elapsed_ms = int((time.time() - start_t) * 1000)
+            self.lbl_t_db.setText(f"✔ SQLite Database Active: '{db_path.name}' | {report_cnt} historical reports [{elapsed_ms}ms]")
+            self.lbl_t_db.setStyleSheet("color: #16a34a; font-weight: 700;")
+            return True
+        except Exception as exc:
+            self.lbl_t_db.setText(f"✖ Database Error: {exc}")
+            self.lbl_t_db.setStyleSheet("color: #dc2626; font-weight: 700;")
+            return False
+
+    def _test_gmail_connection(self) -> bool:
+        token_paths = [Path("credentials/gmail/token.json"), Path("credentials/token.json")]
+        cred_paths = [Path("credentials/gmail/credentials.json"), Path("credentials/credentials.json")]
+        has_token = any(p.exists() for p in token_paths)
+        has_creds = any(p.exists() for p in cred_paths)
+        if has_token:
+            self.lbl_t_gmail.setText("✔ Gmail OAuth Authorized & Ready (token.json present)")
+            self.lbl_t_gmail.setStyleSheet("color: #16a34a; font-weight: 700;")
+            return True
+        elif has_creds:
+            self.lbl_t_gmail.setText("⚠ OAuth Client Present; browser sign-in required on first run")
+            self.lbl_t_gmail.setStyleSheet("color: #d97706; font-weight: 700;")
+            return False
         else:
-            self.lbl_t_ai.setText("⚪ AI Disabled")
-            self.lbl_t_ai.setStyleSheet("color: #64748b;")
+            self.lbl_t_gmail.setText("⚠ Gmail credentials missing (credentials/gmail/credentials.json)")
+            self.lbl_t_gmail.setStyleSheet("color: #d97706; font-weight: 700;")
+            return False
+
+    def _test_ai_connection(self) -> bool:
+        if not self.cb_gemini_enabled.isChecked():
+            self.lbl_t_ai.setText("⚪ Gemini AI Disabled by User")
+            self.lbl_t_ai.setStyleSheet("color: #64748b; font-weight: 600;")
+            return True
+
+        key = self.in_gemini_key.text().strip()
+        if not key:
+            self.lbl_t_ai.setText("✔ Deterministic Fallback Mode Active (Zero Hallucination Rules)")
+            self.lbl_t_ai.setStyleSheet("color: #2563eb; font-weight: 700;")
+            return True
+
+        self.lbl_t_ai.setText("⏳ Connecting to Google Gemini API...")
+        self.lbl_t_ai.setStyleSheet("color: #d97706; font-weight: 600;")
+        QApplication.processEvents()
+
+        try:
+            from app.services.ai.gemini_service import GeminiService
+            srv = GeminiService(api_key=key, enabled=True)
+            res = srv.test_connection()
+            if res.get("success"):
+                lat = res.get("latency_ms", 0)
+                mod = res.get("model", srv.model)
+                self.lbl_t_ai.setText(f"✔ Gemini Connected: {mod} ({lat}ms latency)")
+                self.lbl_t_ai.setStyleSheet("color: #16a34a; font-weight: 700;")
+                return True
+            else:
+                msg = res.get("message", "Connection failed")
+                self.lbl_t_ai.setText(f"✖ Gemini Test Failed: {msg[:60]}")
+                self.lbl_t_ai.setStyleSheet("color: #dc2626; font-weight: 700;")
+                return False
+        except Exception as exc:
+            self.lbl_t_ai.setText(f"✖ Gemini Error: {exc}")
+            self.lbl_t_ai.setStyleSheet("color: #dc2626; font-weight: 700;")
+            return False
+
+    def _test_dash_connection(self) -> bool:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.6)
+        is_port_open = (sock.connect_ex(("127.0.0.1", 8050)) == 0)
+        sock.close()
+        dash_script = Path("services/dash_service/app.py")
+        if is_port_open:
+            self.lbl_t_dash.setText("✔ Plotly Dash Server Running on http://localhost:8050")
+            self.lbl_t_dash.setStyleSheet("color: #16a34a; font-weight: 700;")
+            return True
+        elif dash_script.exists():
+            self.lbl_t_dash.setText("✔ Plotly Dash Microservice Installed (Port 8050 ready to launch)")
+            self.lbl_t_dash.setStyleSheet("color: #16a34a; font-weight: 700;")
+            return True
+        else:
+            self.lbl_t_dash.setText("⚠ Plotly Dash Microservice not found at services/dash_service/app.py")
+            self.lbl_t_dash.setStyleSheet("color: #d97706; font-weight: 700;")
+            return False
+
+    def _run_all_diagnostics(self):
+        self.btn_run_diagnostics.setEnabled(False)
+        self.lbl_diag_status.setText("Testing all subsystems in real time...")
+        QApplication.processEvents()
+
+        e_ok = self._test_excel_connection()
+        QApplication.processEvents()
+        db_ok = self._test_db_connection()
+        QApplication.processEvents()
+        g_ok = self._test_gmail_connection()
+        QApplication.processEvents()
+        ai_ok = self._test_ai_connection()
+        QApplication.processEvents()
+        d_ok = self._test_dash_connection()
+
+        self.btn_run_diagnostics.setEnabled(True)
+        passed = sum([1 for ok in (e_ok, db_ok, g_ok, ai_ok, d_ok) if ok])
+        self.lbl_diag_status.setText(f"✔ Live Diagnostic Complete: {passed} of 5 subsystems verified.")
+        self.lbl_diag_status.setStyleSheet("font-weight: 700; color: #16a34a;" if passed >= 4 else "font-weight: 700; color: #d97706;")
 
     def _create_step8_complete(self) -> QWidget:
         w = QWidget()
@@ -585,6 +736,20 @@ class SetupWizardDialog(QDialog):
 
     def _go_next(self):
         if self.current_step < self.total_steps - 1:
+            # If leaving step 2 (Excel), validate file
+            if self.current_step == 1:
+                target = self.in_excel_file.text().strip().strip('"\'')
+                if not target or not Path(target).exists():
+                    reply = QMessageBox.warning(
+                        self,
+                        "Excel Workbook Notice",
+                        f"The file path '{target}' was not found.\n\nChoose the correct file and file path, otherwise not found or not connected.\n\nDo you want to proceed anyway?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No,
+                    )
+                    if reply == QMessageBox.No:
+                        return
+
             self.current_step += 1
             self._update_step_view()
         else:
@@ -604,7 +769,7 @@ class SetupWizardDialog(QDialog):
             "Excel Workbook & Formula Safety",
             "Gmail Ingestion & Gap Lookback",
             "Google Gemini AI Intelligence",
-            "Streamlit Management BI Analytics",
+            "Plotly Dash BI Web Analytics",
             "Automation Scheduler & Background Run",
             "Live Diagnostics & Connection Checks",
             "Confirmation & System Launch",
@@ -614,8 +779,10 @@ class SetupWizardDialog(QDialog):
         self.btn_back.setEnabled(True)
         if self.current_step == 0:
             self.btn_back.setText("← Back to Dashboard")
+            self.btn_header_back.setText("← Back to Dashboard")
         else:
             self.btn_back.setText("← Back")
+            self.btn_header_back.setText("← Back")
 
         if self.current_step == self.total_steps - 1:
             self.btn_next.setText("Save && Start")
@@ -624,6 +791,14 @@ class SetupWizardDialog(QDialog):
 
     def _save_and_finish(self):
         """Save settings to config/settings.json."""
+        target_excel = self.in_excel_file.text().strip().strip('"\'')
+        if not target_excel or not Path(target_excel).exists():
+            QMessageBox.warning(
+                self,
+                "Excel File Not Found",
+                "Choose the correct file and file path, otherwise not found or not connected.\n\nYou can select a valid workbook using Browse on Step 2.",
+            )
+
         new_settings = {
             "company": self.in_company.text().strip(),
             "plant": self.in_plant.text().strip(),
@@ -636,7 +811,7 @@ class SetupWizardDialog(QDialog):
                 "expected_unit": "kWh",
             },
             "excel": {
-                "file": self.in_excel_file.text().strip().strip('"\''),
+                "file": target_excel,
                 "worksheet": self.in_excel_sheet.text().strip(),
                 "header_row": 3,
                 "date_column": 2,
@@ -659,11 +834,11 @@ class SetupWizardDialog(QDialog):
                 "model": self.in_gemini_model.text().strip(),
                 "api_key": self.in_gemini_key.text().strip(),
             },
-            "streamlit": {
-                "enabled": self.cb_st_enabled.isChecked(),
-                "cloud_url": self.in_st_url.text().strip(),
-                "cache_ttl_seconds": self.in_st_cache_ttl.value(),
-                "auto_launch_browser": self.cb_st_auto_launch.isChecked(),
+            "dash": {
+                "enabled": self.cb_dash_enabled.isChecked(),
+                "url": self.in_dash_url.text().strip(),
+                "port": 8050,
+                "auto_launch_browser": self.cb_dash_auto_launch.isChecked(),
             },
         }
 

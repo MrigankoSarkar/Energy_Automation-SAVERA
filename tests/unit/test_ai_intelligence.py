@@ -6,7 +6,9 @@ def test_gemini_qa_insufficient_data():
     gs = GeminiService(enabled=False)
     res = gs.ask("What happened to energy consumption yesterday?", context_data={})
     assert res["status"] == "insufficient_data"
-    assert res["answer"] == "Insufficient data available."
+    assert "Insufficient data available." in res["answer"]
+    assert "suggestions" in res
+    assert len(res["suggestions"]) > 0
 
 
 def test_gemini_qa_top_meters():
