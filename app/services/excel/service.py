@@ -1210,7 +1210,11 @@ class ExcelService:
             # Pre-save backup & Atomic Save
             # --------------------------------------------------------
 
-            backup_dir = Path("data") / "backups"
+            try:
+                from app.paths import get_backups_dir
+                backup_dir = get_backups_dir()
+            except Exception:
+                backup_dir = Path("data") / "backups"
             backup_dir.mkdir(
                 parents=True,
                 exist_ok=True,

@@ -1,0 +1,42 @@
+{
+  "company": "Savera Auto Comps Pvt Ltd",
+  "plant": "Pune Manufacturing Plant",
+  "gmail": {
+    "sender": "alerts@nbsense.com",
+    "subject_contains": "Ems Monitoring Report",
+    "search_days": 1
+  },
+  "pdf": {
+    "expected_unit": "kWh"
+  },
+  "excel": {
+    "file": "",
+    "worksheet": "EMS Monitoring Report",
+    "header_row": 3,
+    "date_column": 2,
+    "first_data_row": 5,
+    "total_column": 18,
+    "update_total": true,
+    "fail_on_unmapped_numeric_meter": false
+  },
+  "automation": {
+    "check_interval_minutes": 5,
+    "start_automatically": false,
+    "start_minimized": false
+  },
+  "validation": {
+    "minimum_active_energy": 0,
+    "maximum_active_energy": 100000000
+  },
+  "gemini": {
+    "enabled": false,
+    "model": "gemini-flash-latest",
+    "api_key": ""
+  },
+  "dash": {
+    "enabled": true,
+    "url": "http://localhost:8050",
+    "port": 8050,
+    "auto_launch_browser": true
+  }
+}

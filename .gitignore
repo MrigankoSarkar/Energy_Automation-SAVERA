@@ -88,3 +88,27 @@ archive/
 # Isolated Sandbox & Streamlit Verification (99.9% Accuracy Testing)
 # =====================================================================
 isolated_streamlit_test/
+
+
+# ----------------------------------------------------------------------
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+build/
+dist/
+
+# Release packages / compiled application
+release/
+
+# Logs
+*.log
+
+# Local generated data
+data/pdfs/
+data/backups/
+
+# Local credentials
+credentials/

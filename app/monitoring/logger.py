@@ -21,7 +21,11 @@ def _initialize_logging() -> None:
     if _initialized:
         return
 
-    log_directory = Path("data") / "logs"
+    try:
+        from app.paths import get_logs_dir
+        log_directory = get_logs_dir()
+    except Exception:
+        log_directory = Path("data") / "logs"
     log_directory.mkdir(parents=True, exist_ok=True)
 
     log_file = log_directory / "energy_automation.log"

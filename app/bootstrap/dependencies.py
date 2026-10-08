@@ -84,11 +84,15 @@ def _load_config() -> Dict[str, Any]:
         config/settings.json
     """
 
-    settings_file = (
-        _project_root()
-        / "config"
-        / "settings.json"
-    )
+    try:
+        from app.paths import get_settings_file
+        settings_file = get_settings_file()
+    except Exception:
+        settings_file = (
+            _project_root()
+            / "config"
+            / "settings.json"
+        )
 
     if settings_file.exists():
         try:
@@ -340,25 +344,26 @@ def build_services(
     # DIRECTORIES
     # =========================================================================
 
+    try:
+        from app.paths import get_credentials_dir, get_reports_dir, get_database_dir
+        default_cred_dir = get_credentials_dir()
+        default_download_dir = get_reports_dir()
+        default_data_dir = get_database_dir()
+    except Exception:
+        default_cred_dir = "credentials/gmail"
+        default_download_dir = "data/downloads"
+        default_data_dir = "data"
+
     credentials_dir = _ensure_directory(
-        gmail_settings.get(
-            "credentials_dir",
-            "credentials/gmail",
-        )
+        gmail_settings.get("credentials_dir") or default_cred_dir
     )
 
     download_dir = _ensure_directory(
-        gmail_settings.get(
-            "download_dir",
-            "data/downloads",
-        )
+        gmail_settings.get("download_dir") or default_download_dir
     )
 
     data_dir = _ensure_directory(
-        database_settings.get(
-            "data_dir",
-            "data",
-        )
+        database_settings.get("data_dir") or default_data_dir
     )
 
     # =========================================================================

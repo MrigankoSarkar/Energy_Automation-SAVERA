@@ -236,7 +236,11 @@ class Dashboard(FluentWindow):
         self.alert_socket_worker: Optional[AlertSocketWorker] = None
 
         self.setWindowTitle("EnergyAutomation — EMS Monitoring")
-        app_icon = Path("assets/app.ico")
+        try:
+            from app.paths import get_asset_path
+            app_icon = get_asset_path("app.ico")
+        except Exception:
+            app_icon = Path("assets/app.ico")
         if app_icon.exists():
             self.setWindowIcon(QIcon(str(app_icon)))
 
@@ -2270,7 +2274,11 @@ class Dashboard(FluentWindow):
             os.environ.pop("GEMINI_API_KEY", None)
 
         # Update settings.json
-        settings_path = Path("config/settings.json")
+        try:
+            from app.paths import get_settings_file
+            settings_path = get_settings_file()
+        except Exception:
+            settings_path = Path("config/settings.json")
         try:
             cur_settings = {}
             if settings_path.exists():
@@ -2435,7 +2443,11 @@ class Dashboard(FluentWindow):
         return card
 
     def _load_persisted_config(self) -> Dict[str, Any]:
-        settings_path = Path("config/settings.json")
+        try:
+            from app.paths import get_settings_file
+            settings_path = get_settings_file()
+        except Exception:
+            settings_path = Path("config/settings.json")
         if settings_path.exists():
             try:
                 with open(settings_path, "r", encoding="utf-8") as f:
@@ -2445,7 +2457,11 @@ class Dashboard(FluentWindow):
         return {}
 
     def _save_persisted_config(self, cfg: Dict[str, Any]) -> bool:
-        settings_path = Path("config/settings.json")
+        try:
+            from app.paths import get_settings_file
+            settings_path = get_settings_file()
+        except Exception:
+            settings_path = Path("config/settings.json")
         try:
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             with open(settings_path, "w", encoding="utf-8") as f:

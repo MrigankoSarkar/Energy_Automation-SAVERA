@@ -14,7 +14,11 @@ from app.persistence.repositories.report_repository import ReportRepository
 
 
 SAMPLE_PDF = Path("data/pdfs/report_2026-09-11_2026-09-12.pdf").resolve()
-ORIGINAL_EXCEL = Path("Test_BI_Analysis_Report_2026.xlsx").resolve()
+ORIGINAL_EXCEL = (
+    Path("Test_BI_Analysis_Report_2026.xlsx").resolve()
+    if Path("Test_BI_Analysis_Report_2026.xlsx").exists()
+    else Path("BI_Analysis_Report_2026.xlsx").resolve()
+)
 
 
 class MockGmailRepository:

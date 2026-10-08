@@ -27,7 +27,11 @@ class Application:
                     raise
 
     def start(self):
-        settings_path = Path("config") / "settings.json"
+        try:
+            from app.paths import get_settings_file
+            settings_path = get_settings_file()
+        except Exception:
+            settings_path = Path("config") / "settings.json"
         start_minimized = False
         start_automatically = True
 

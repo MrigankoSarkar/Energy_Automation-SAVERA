@@ -18,13 +18,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Auto-switch to virtual environment python if available
-venv_python = Path(__file__).resolve().parent / ".venv" / "Scripts" / "python.exe"
-if venv_python.exists() and Path(sys.executable).resolve() != venv_python.resolve():
-    sys.exit(subprocess.call([str(venv_python)] + sys.argv))
+# Auto-switch to virtual environment python if available (only in development)
+if not getattr(sys, "frozen", False):
+    venv_python = Path(__file__).resolve().parent / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists() and Path(sys.executable).resolve() != venv_python.resolve():
+        sys.exit(subprocess.call([str(venv_python)] + sys.argv))
 
 
 def main() -> None:
+    from app.paths import initialize_runtime_environment
+    initialize_runtime_environment()
+
     parser = argparse.ArgumentParser(description="EnergyAutomation Microservices Platform")
     parser.add_argument(
         "--service",

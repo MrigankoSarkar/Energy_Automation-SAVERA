@@ -170,11 +170,18 @@ class SetupWizardDialog(QDialog):
     8-Step guided enterprise setup wizard for initial deployment and re-configuration.
     """
 
-    def __init__(self, parent: QWidget | None = None, config_path: str = "config/settings.json"):
+    def __init__(self, parent: QWidget | None = None, config_path: Optional[str | Path] = None):
         super().__init__(parent)
         self.setWindowTitle("EnergyAutomation — Initial Setup Wizard")
         self.resize(760, 560)
-        self.config_path = Path(config_path)
+        if config_path is None:
+            try:
+                from app.paths import get_settings_file
+                self.config_path = get_settings_file()
+            except Exception:
+                self.config_path = Path("config/settings.json")
+        else:
+            self.config_path = Path(config_path)
         self.current_step = 0
         self.total_steps = 8
 
@@ -240,7 +247,11 @@ class SetupWizardDialog(QDialog):
         # Header with Logo, Title, and Persistent Back button
         header = QHBoxLayout()
         logo_label = QLabel()
-        logo_path = Path("assets/savera-logo.jpg")
+        try:
+            from app.paths import get_asset_path
+            logo_path = get_asset_path("savera-logo.jpg")
+        except Exception:
+            logo_path = Path("assets/savera-logo.jpg")
         if logo_path.exists():
             pix = QPixmap(str(logo_path)).scaledToHeight(36, Qt.SmoothTransformation)
             logo_label.setPixmap(pix)
@@ -591,7 +602,11 @@ class SetupWizardDialog(QDialog):
 
     def _test_db_connection(self) -> bool:
         start_t = time.time()
-        db_path = Path("data/automation.db")
+        try:
+            from app.paths import get_database_dir
+            db_path = get_database_dir() / "automation.db"
+        except Exception:
+            db_path = Path("data/automation.db")
         if not db_path.exists():
             db_path = Path("automation.db")
         try:
